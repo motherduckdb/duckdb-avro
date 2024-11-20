@@ -7,12 +7,13 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/extension_util.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
+#include "utf8proc_wrapper.hpp"
 
 #include "avro.h"
 
 namespace duckdb {
 
-struct AvroBindData : public FunctionData {
+struct AvroBindData : FunctionData {
 
   string filename;
 
@@ -118,20 +119,22 @@ static void TransformValue(avro_value *avro_val, Vector &target,
   case LogicalType::SQLNULL: {
     break;
   }
-  case LogicalType::VARCHAR: {
-    auto data_ptr = FlatVector::GetData<string_t>(target);
-    avro_wrapped_buffer str_buf = AVRO_WRAPPED_BUFFER_EMPTY;
-    if (avro_value_grab_string(avro_val, &str_buf)) {
+
+  case LogicalType::BOOLEAN: {
+    int bool_val;
+    if (avro_value_get_boolean(avro_val, &bool_val)) {
       throw InvalidInputException(avro_strerror());
     }
-    // avro strings are null-terminated
-    D_ASSERT(const_char_ptr_cast(str_buf.buf)[str_buf.size-1] == '\0');
-    data_ptr[out_idx] = StringVector::AddString(
-        target, const_char_ptr_cast(str_buf.buf), str_buf.size-1);
-    str_buf.free(&str_buf);
+    FlatVector::GetData<uint8_t>(target)[out_idx] = bool_val != 0;
     break;
   }
-
+  case LogicalType::INTEGER: {
+    if (avro_value_get_int(avro_val,
+                           &FlatVector::GetData<int32_t>(target)[out_idx])) {
+      throw InvalidInputException(avro_strerror());
+    }
+    break;
+  }
   case LogicalType::BIGINT: {
     if (avro_value_get_long(avro_val,
                             &FlatVector::GetData<int64_t>(target)[out_idx])) {
@@ -144,6 +147,25 @@ static void TransformValue(avro_value *avro_val, Vector &target,
                               &FlatVector::GetData<double>(target)[out_idx])) {
       throw InvalidInputException(avro_strerror());
     }
+    break;
+  }
+  case LogicalType::BLOB:
+  case LogicalType::VARCHAR: {
+    avro_wrapped_buffer str_buf = AVRO_WRAPPED_BUFFER_EMPTY;
+    if (avro_value_grab_string(avro_val, &str_buf)) {
+      throw InvalidInputException(avro_strerror());
+    }
+    // avro strings are null-terminated
+    D_ASSERT(const_char_ptr_cast(str_buf.buf)[str_buf.size - 1] == '\0');
+    if (type.id() == LogicalType::VARCHAR &&
+        Utf8Proc::Analyze(const_char_ptr_cast(str_buf.buf), str_buf.size - 1) ==
+            UnicodeType::INVALID) {
+      throw InvalidInputException("Avro file contains invalid unicode");
+    }
+    FlatVector::GetData<string_t>(target)[out_idx] =
+        StringVector::AddStringOrBlob(target, const_char_ptr_cast(str_buf.buf),
+                                      str_buf.size - 1);
+    str_buf.free(&str_buf);
     break;
   }
   case LogicalTypeId::STRUCT: {
@@ -191,10 +213,9 @@ static void TransformValue(avro_value *avro_val, Vector &target,
   }
 }
 
-struct AvroGlobalState : public GlobalTableFunctionState {
+struct AvroGlobalState : GlobalTableFunctionState {
   ~AvroGlobalState() {
     // avro_value_decref(&value);
-    // avro_schema_decref(schema);
     //
     // avro_file_reader_close(reader);
   }
@@ -202,8 +223,9 @@ struct AvroGlobalState : public GlobalTableFunctionState {
     if (avro_file_reader(filename.c_str(), &reader)) {
       throw InvalidInputException(avro_strerror());
     }
-    schema = avro_file_reader_get_writer_schema(reader);
+    auto schema = avro_file_reader_get_writer_schema(reader);
     auto interface = avro_generic_class_from_schema(schema);
+    avro_schema_decref(schema);
     avro_generic_value_new(interface, &value);
     avro_value_iface_decref(interface);
   }
