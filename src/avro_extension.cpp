@@ -124,8 +124,10 @@ static void TransformValue(avro_value *avro_val, Vector &target,
     if (avro_value_grab_string(avro_val, &str_buf)) {
       throw InvalidInputException(avro_strerror());
     }
+    // avro strings are null-terminated
+    D_ASSERT(const_char_ptr_cast(str_buf.buf)[str_buf.size-1] == '\0');
     data_ptr[out_idx] = StringVector::AddString(
-        target, const_char_ptr_cast(str_buf.buf), str_buf.size);
+        target, const_char_ptr_cast(str_buf.buf), str_buf.size-1);
     str_buf.free(&str_buf);
     break;
   }
@@ -189,42 +191,56 @@ static void TransformValue(avro_value *avro_val, Vector &target,
   }
 }
 
+struct AvroGlobalState : public GlobalTableFunctionState {
+  ~AvroGlobalState() {
+    // avro_value_decref(&value);
+    // avro_schema_decref(schema);
+    //
+    // avro_file_reader_close(reader);
+  }
+  AvroGlobalState(string filename) {
+    if (avro_file_reader(filename.c_str(), &reader)) {
+      throw InvalidInputException(avro_strerror());
+    }
+    schema = avro_file_reader_get_writer_schema(reader);
+    auto interface = avro_generic_class_from_schema(schema);
+    avro_generic_value_new(interface, &value);
+    avro_value_iface_decref(interface);
+  }
+  avro_file_reader_t reader;
+  avro_schema_t schema;
+  avro_value_t value;
+};
+
 static void AvroTableFunction(ClientContext &context, TableFunctionInput &data,
                               DataChunk &output) {
 
   D_ASSERT(output.data.size() == 1);
   D_ASSERT(output.GetTypes().size() == 1);
   D_ASSERT(output.GetTypes()[0].id() == LogicalTypeId::STRUCT);
-
-  auto bind_data = data.bind_data->Cast<AvroBindData>();
-  avro_file_reader_t reader;
-  if (avro_file_reader(bind_data.filename.c_str(), &reader)) {
-    throw InvalidInputException(avro_strerror());
-  }
-  auto avro_schema = avro_file_reader_get_writer_schema(reader);
-  auto avro_interface = avro_generic_class_from_schema(avro_schema);
-
-  avro_value_t avro_value;
-  avro_generic_value_new(avro_interface, &avro_value);
-
+  auto global_state = data.global_state->Cast<AvroGlobalState>();
   idx_t out_idx = 0;
-
-  // TODO do something with the result of read_value?
-  while (avro_file_reader_read_value(reader, &avro_value) == 0) {
-    TransformValue(&avro_value, output.data[0], out_idx++);
+  while (avro_file_reader_read_value(global_state.reader,
+                                     &global_state.value) == 0) {
+    TransformValue(&global_state.value, output.data[0], out_idx++);
+    if (out_idx == STANDARD_VECTOR_SIZE) {
+      break;
+    }
   }
   output.SetCardinality(out_idx);
+}
 
-  avro_value_decref(&avro_value);
-  avro_schema_decref(avro_schema);
-  avro_value_iface_decref(avro_interface);
-  avro_file_reader_close(reader);
+static unique_ptr<GlobalTableFunctionState>
+AvroGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
+  return make_uniq<AvroGlobalState>(
+      input.bind_data->Cast<AvroBindData>().filename);
 }
 
 static void LoadInternal(DatabaseInstance &instance) {
   // Register a scalar function
-  auto avro_read_function = TableFunction("read_avro", {LogicalType::VARCHAR},
-                                          AvroTableFunction, AvroBindFunction);
+  auto avro_read_function =
+      TableFunction("read_avro", {LogicalType::VARCHAR}, AvroTableFunction,
+                    AvroBindFunction, AvroGlobalInit);
   ExtensionUtil::RegisterFunction(instance, avro_read_function);
 }
 

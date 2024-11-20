@@ -4,14 +4,26 @@
 
 require avro
 
-
 query II
-select column_name, column_type from (DESCRIBE FROM read_avro('test/userdata5.avro'));
+select column_name, column_type from (DESCRIBE FROM read_avro('test/userdata1.avro'));
 ----
 kylosample	STRUCT(registration_dttm VARCHAR, id BIGINT, first_name VARCHAR, last_name VARCHAR, email VARCHAR, gender VARCHAR, ip_address VARCHAR, cc UNION(u0 INTEGER, u1 BIGINT), country VARCHAR, birthdate VARCHAR, salary UNION(u0 INTEGER, u1 DOUBLE), title VARCHAR, "comments" VARCHAR)
 
-
-# Before we load the extension, this will fail
 query I
-FROM read_avro('test/userdata5.avro') limit 10;
+FROM (FROM read_avro('test/userdata1.avro') SELECT kylosample.*) SELECT first_name ORDER BY registration_dttm LIMIT 10;
 ----
+Lillian
+Chris
+Nicholas
+Johnny
+Bruce
+Heather
+Larry
+Roy
+James
+Sean
+
+query I
+FROM read_avro('test/userdata1.avro') SELECT COUNT(*)
+----
+1000
