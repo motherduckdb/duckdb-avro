@@ -100,72 +100,125 @@ AvroBindFunction(ClientContext &context, TableFunctionBindInput &input,
 
   auto avro_schema = avro_file_reader_get_writer_schema(reader);
   auto type = TransformSchema(avro_schema);
+
+  names.push_back(avro_schema_type_name(avro_schema));
+  return_types.push_back(std::move(type));
+
   avro_schema_decref(avro_schema);
   avro_file_reader_close(reader);
 
-  if (type.id() == LogicalTypeId::STRUCT) {
-    for (idx_t child_idx = 0; child_idx < StructType::GetChildCount(type);
-         child_idx++) {
-      names.push_back(StructType::GetChildName(type, child_idx));
-      return_types.push_back(
-          std::move(StructType::GetChildType(type, child_idx)));
+  return bind_data;
+}
+
+static void TransformValue(avro_value *avro_val, Vector &target,
+                           idx_t out_idx) {
+
+  auto &type = target.GetType();
+  switch (type.id()) {
+  case LogicalType::SQLNULL: {
+    break;
+  }
+  case LogicalType::VARCHAR: {
+    auto data_ptr = FlatVector::GetData<string_t>(target);
+    avro_wrapped_buffer str_buf = AVRO_WRAPPED_BUFFER_EMPTY;
+    if (avro_value_grab_string(avro_val, &str_buf)) {
+      throw InvalidInputException(avro_strerror());
     }
-  } else {
-    names.push_back("avro_root");
-    return_types.push_back(std::move(type));
+    data_ptr[out_idx] = StringVector::AddString(
+        target, const_char_ptr_cast(str_buf.buf), str_buf.size);
+    str_buf.free(&str_buf);
+    break;
   }
 
-  return bind_data;
+  case LogicalType::BIGINT: {
+    if (avro_value_get_long(avro_val,
+                            &FlatVector::GetData<int64_t>(target)[out_idx])) {
+      throw InvalidInputException(avro_strerror());
+    }
+    break;
+  }
+  case LogicalType::DOUBLE: {
+    if (avro_value_get_double(avro_val,
+                              &FlatVector::GetData<double>(target)[out_idx])) {
+      throw InvalidInputException(avro_strerror());
+    }
+    break;
+  }
+  case LogicalTypeId::STRUCT: {
+    child_list_t<Value> children;
+    size_t child_count;
+    if (avro_value_get_size(avro_val, &child_count)) {
+      throw InvalidInputException(avro_strerror());
+    }
+    for (idx_t child_idx = 0; child_idx < child_count; child_idx++) {
+      avro_value child_value;
+      if (avro_value_get_by_index(avro_val, child_idx, &child_value, nullptr)) {
+        throw InvalidInputException(avro_strerror());
+      }
+      TransformValue(&child_value, *StructVector::GetEntries(target)[child_idx],
+                     out_idx);
+    }
+    break;
+  }
+  case LogicalTypeId::UNION: {
+    int discriminant;
+    avro_value union_value;
+    if (avro_value_get_discriminant(avro_val, &discriminant) ||
+        avro_value_get_current_branch(avro_val, &union_value)) {
+      throw InvalidInputException(avro_strerror());
+    }
+    if (discriminant >= UnionType::GetMemberCount(type)) {
+      throw InvalidInputException("Invalid union tag");
+    }
+    for (idx_t union_idx = 0; union_idx < UnionType::GetMemberCount(type);
+         union_idx++) {
+      FlatVector::Validity(UnionVector::GetMember(target, union_idx))
+          .SetInvalid(out_idx);
+    }
+
+    auto &tags = UnionVector::GetTags(target);
+    FlatVector::GetData<union_tag_t>(tags)[out_idx] = discriminant;
+    auto &union_vector = UnionVector::GetMember(target, discriminant);
+    TransformValue(&union_value, union_vector, out_idx);
+    FlatVector::Validity(union_vector).SetValid(out_idx);
+
+    break;
+  }
+  default:
+    throw NotImplementedException(type.ToString());
+  }
 }
 
 static void AvroTableFunction(ClientContext &context, TableFunctionInput &data,
                               DataChunk &output) {
 
-  //
-  // auto num_columns = avro_schema_record_size(wschema);
-  //
-  // printf("%s %s\n", avro_schema_name(wschema),
-  // avro_schema_type_name(wschema));
-  //
-  //
-  // for (idx_t col_idx=0; col_idx < num_columns; col_idx++) {
-  // 	auto col_schema =  avro_schema_record_field_get_by_index(wschema,
-  // col_idx);
-  //
-  // 	printf("%s %s %s\n",  avro_schema_name(col_schema),
-  // avro_schema_record_field_name(wschema, col_idx),
-  // avro_schema_type_name(col_schema));
-  // }
-  //
-  // auto iface = avro_generic_class_from_schema(wschema);
-  // avro_generic_value_new(iface, &value);
-  // int rval;
-  //
-  //
-  // while ((rval = avro_file_reader_read_value(reader, &value)) == 0) {
-  // 	char  *json;
-  //
-  // 	if (avro_value_to_json(&value, 1, &json)) {
-  // 		fprintf(stderr, "Error converting value to JSON: %s\n",
-  // 			avro_strerror());
-  // 	} else {
-  // 		//printf("%s\n", json);
-  // 		free(json);
-  // 	}
-  //
-  // 	avro_value_reset(&value);
-  // }
-  //
-  // // If it was not an EOF that caused it to fail,
-  // // print the error.
-  // if (rval != EOF) {
-  // 	fprintf(stderr, "Error: %s\n", avro_strerror());
-  // }
-  //
-  //
-  // avro_value_decref(&value);
-  // avro_value_iface_decref(iface);
-  // avro_schema_decref(wschema);
+  D_ASSERT(output.data.size() == 1);
+  D_ASSERT(output.GetTypes().size() == 1);
+  D_ASSERT(output.GetTypes()[0].id() == LogicalTypeId::STRUCT);
+
+  auto bind_data = data.bind_data->Cast<AvroBindData>();
+  avro_file_reader_t reader;
+  if (avro_file_reader(bind_data.filename.c_str(), &reader)) {
+    throw InvalidInputException(avro_strerror());
+  }
+  auto avro_schema = avro_file_reader_get_writer_schema(reader);
+  auto avro_interface = avro_generic_class_from_schema(avro_schema);
+
+  avro_value_t avro_value;
+  avro_generic_value_new(avro_interface, &avro_value);
+
+  idx_t out_idx = 0;
+
+  // TODO do something with the result of read_value?
+  while (avro_file_reader_read_value(reader, &avro_value) == 0) {
+    TransformValue(&avro_value, output.data[0], out_idx++);
+  }
+  output.SetCardinality(out_idx);
+
+  avro_value_decref(&avro_value);
+  avro_schema_decref(avro_schema);
+  avro_value_iface_decref(avro_interface);
+  avro_file_reader_close(reader);
 }
 
 static void LoadInternal(DatabaseInstance &instance) {
