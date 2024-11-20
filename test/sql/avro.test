@@ -1,0 +1,28 @@
+# name: test/sql/avro.test
+# description: test avro extension
+# group: [avro]
+
+require avro
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/userdata5.avro'));
+----
+registration_dttm	VARCHAR
+id	BIGINT
+first_name	VARCHAR
+last_name	VARCHAR
+email	VARCHAR
+gender	VARCHAR
+ip_address	VARCHAR
+cc	UNION(u0 INTEGER, u1 BIGINT)
+country	VARCHAR
+birthdate	VARCHAR
+salary	UNION(u0 INTEGER, u1 DOUBLE)
+title	VARCHAR
+comments	VARCHAR
+
+# Before we load the extension, this will fail
+query IIIIIIIIIIIII
+FROM read_avro('test/userdata5.avro') order by all;
+----
