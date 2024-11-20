@@ -29,10 +29,6 @@ struct AvroBindData : FunctionData {
   }
 };
 
-// map
-// array
-// ...
-
 static LogicalType TransformSchema(avro_schema_t &avro_schema) {
   auto raw_type_name = avro_schema_type_name(avro_schema);
   if (!raw_type_name || strlen(raw_type_name) == 0) {
@@ -119,7 +115,6 @@ static void TransformValue(avro_value *avro_val, Vector &target,
   case LogicalType::SQLNULL: {
     break;
   }
-
   case LogicalType::BOOLEAN: {
     int bool_val;
     if (avro_value_get_boolean(avro_val, &bool_val)) {
@@ -138,6 +133,13 @@ static void TransformValue(avro_value *avro_val, Vector &target,
   case LogicalType::BIGINT: {
     if (avro_value_get_long(avro_val,
                             &FlatVector::GetData<int64_t>(target)[out_idx])) {
+      throw InvalidInputException(avro_strerror());
+    }
+    break;
+  }
+  case LogicalType::FLOAT: {
+    if (avro_value_get_float(avro_val,
+                             &FlatVector::GetData<float>(target)[out_idx])) {
       throw InvalidInputException(avro_strerror());
     }
     break;
@@ -215,8 +217,8 @@ static void TransformValue(avro_value *avro_val, Vector &target,
 
 struct AvroGlobalState : GlobalTableFunctionState {
   ~AvroGlobalState() {
+    // TODO why does this crash
     // avro_value_decref(&value);
-    //
     // avro_file_reader_close(reader);
   }
   AvroGlobalState(string filename) {
