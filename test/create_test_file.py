@@ -104,21 +104,75 @@ reader.close()
 
 
 json_schema = """
-{"namespace": "example3.avro",
- "type": ["int", "null"],
- "name": "my_union"
+{ "type": "record",
+ "name": "root",
+ "fields": [
+     {"name": "single_union", "type": ["int"]}
+ ]
 }
 """
 
 schema = avro.schema.parse(json_schema)
 
-writer = DataFileWriter(open("root-union.avro", "wb"), DatumWriter(), schema)
-# writer.append(42)
-# writer.append()
+writer = DataFileWriter(open("single-union.avro", "wb"), DatumWriter(), schema)
+writer.append({ "single_union":42})
+
 
 writer.close()
 
-reader = DataFileReader(open("root-union.avro", "rb"), DatumReader())
+reader = DataFileReader(open("single-union.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
+json_schema = """
+{ "type": "record",
+ "name": "root",
+ "fields": [
+     {"name": "null_first", "type": ["null","int"]}
+ ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("null_first.avro", "wb"), DatumWriter(), schema)
+writer.append({ "null_first":42})
+writer.append({})
+
+
+writer.close()
+
+reader = DataFileReader(open("null_first.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
+json_schema = """
+{ "type": "record",
+ "name": "root",
+ "fields": [
+     {"name": "null_last", "type": ["int","null"]}
+ ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("null_last.avro", "wb"), DatumWriter(), schema)
+writer.append({ "null_last":42})
+writer.append({})
+
+
+writer.close()
+
+reader = DataFileReader(open("null_last.avro", "rb"), DatumReader())
 for user in reader:
     print(user)
 reader.close()

@@ -158,6 +158,9 @@ AvroBindFunction(ClientContext &context, TableFunctionBindInput &input,
   auto bind_data = make_uniq<AvroBindData>();
   bind_data->filename = input.inputs[0].ToString();
   avro_file_reader_t reader;
+  if (!FileSystem::GetFileSystem(context).FileExists(bind_data->filename)) {
+    throw InvalidInputException("Avro file %s not found", bind_data->filename);
+  }
   if (avro_file_reader(bind_data->filename.c_str(), &reader)) {
     throw InvalidInputException(avro_strerror());
   }
@@ -264,7 +267,6 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
     break;
   }
 
-  // TODO what about single-child unions in general?? have a test!
   case LogicalTypeId::UNION: {
 
     int discriminant;

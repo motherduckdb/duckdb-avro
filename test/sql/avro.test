@@ -58,3 +58,46 @@ FROM read_avro('test/users.avro')
 ----
 Alyssa	256	NULL
 Ben	7	red
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/single-union.avro'));
+----
+single_union	INTEGER
+
+# example from readme
+query I
+FROM read_avro('test/single-union.avro')
+----
+42
+
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/null_first.avro'));
+----
+null_first	INTEGER
+
+# example from readme
+query I
+FROM read_avro('test/null_first.avro')
+----
+42
+NULL
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/null_last.avro'));
+----
+null_last	INTEGER
+
+# example from readme
+query I
+FROM read_avro('test/null_last.avro')
+----
+42
+NULL
+
+statement error
+from read_avro('does-not-exist.avro')
+----
+not found
