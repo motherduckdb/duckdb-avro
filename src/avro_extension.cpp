@@ -275,19 +275,25 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
             .SetInvalid(out_idx);
       }
     }
-    if (avro_type.children[discriminant].second.type ==
+    FlatVector::Validity(target).SetInvalid(out_idx);
+
+    if (avro_type.children[discriminant].second.type !=
         LogicalTypeId::SQLNULL) {
-      // value is null whether its union or not
-      FlatVector::Validity(target).SetInvalid(out_idx);
-    } else {
       if (target.GetType().id() == LogicalTypeId::UNION) {
         auto &tags = UnionVector::GetTags(target);
-        // TODO calculate actual discriminant, it will be wrong if null is first
-        FlatVector::GetData<union_tag_t>(tags)[out_idx] = discriminant;
-        auto &union_vector = UnionVector::GetMember(target, discriminant);
+        // TODO this is excessive for every value
+        int duckdb_struct_idx = 0;
+        for (idx_t child_idx = 0; child_idx < discriminant; child_idx++) {
+          if (avro_type.children[discriminant].second.type !=
+              LogicalTypeId::SQLNULL) {
+            duckdb_struct_idx++;
+          }
+        }
+        FlatVector::GetData<union_tag_t>(tags)[out_idx] = duckdb_struct_idx;
+        auto &union_vector = UnionVector::GetMember(target, duckdb_struct_idx);
         TransformValue(&union_value, avro_type.children[discriminant].second,
                        union_vector, out_idx);
-      } else { // directly recurse
+      } else { // directly recurse, we have dissolved the union
         TransformValue(&union_value, avro_type.children[discriminant].second,
                        target, out_idx);
       }
