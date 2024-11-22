@@ -7,71 +7,124 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/extension_util.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
+#include <sys/socket.h>
+
 #include "utf8proc_wrapper.hpp"
 
 #include "avro.h"
 
 namespace duckdb {
 
+struct AvroType {
+  AvroType() : type(LogicalTypeId::INVALID) {}
+
+  AvroType(LogicalTypeId type_p, child_list_t<AvroType> children_p = {})
+      : type(type_p), children(children_p) {}
+  LogicalTypeId type;
+  child_list_t<AvroType> children;
+
+  bool operator==(const AvroType &other) const {
+    return type == other.type && children == other.children;
+  }
+};
+
 struct AvroBindData : FunctionData {
 
   string filename;
-  LogicalType root_type;
+  AvroType avro_type;
+  LogicalType duckdb_type;
 
-  bool Equals(const FunctionData &other_p) const {
+  bool Equals(const FunctionData &other_p) const override {
     const AvroBindData &other = static_cast<const AvroBindData &>(other_p);
-    return filename == other.filename && root_type == other.root_type;
+    return filename == other.filename && avro_type == other.avro_type &&
+           duckdb_type == other.duckdb_type;
   }
 
-  unique_ptr<FunctionData> Copy() const {
+  unique_ptr<FunctionData> Copy() const override {
     auto bind_data = make_uniq<AvroBindData>();
     bind_data->filename = filename;
-    bind_data->root_type = root_type;
+    bind_data->avro_type = avro_type;
+    bind_data->duckdb_type = duckdb_type;
 
     return bind_data;
   }
 };
 
-static LogicalType TransformSchema(avro_schema_t &avro_schema) {
+// we use special transformation rules for unions with null:
+// 1) the null does not become a union entry and
+// 2) if there is only one entry the union disappears and is repaced by its
+// child
+static LogicalType TransformAvroType(const AvroType &avro_type) {
+  child_list_t<LogicalType> children;
+
+  switch (avro_type.type) {
+  case LogicalTypeId::STRUCT: {
+    for (auto &child : avro_type.children) {
+      children.push_back(std::pair<std::string, LogicalType>(
+          child.first, TransformAvroType(child.second)));
+    }
+    return LogicalType::STRUCT(std::move(children));
+  }
+  case LogicalTypeId::UNION: {
+    for (auto &child : avro_type.children) {
+      if (child.second.type == LogicalTypeId::SQLNULL) {
+        continue;
+      }
+      children.push_back(std::pair<std::string, LogicalType>(
+          child.first, TransformAvroType(child.second)));
+    }
+    if (children.size() == 1) {
+      return children[0].second;
+    }
+    return LogicalType::UNION(std::move(children));
+  }
+  case LogicalTypeId::SQLNULL:
+    throw InternalException("This should not happen");
+  default:
+    return LogicalType(avro_type.type);
+  }
+}
+
+static AvroType TransformSchema(avro_schema_t &avro_schema) {
   auto raw_type_name = avro_schema_type_name(avro_schema);
   if (!raw_type_name || strlen(raw_type_name) == 0) {
     throw InvalidInputException("Empty avro type name");
   }
   auto type_name = string(raw_type_name);
   if (type_name == "string") {
-    return LogicalType::VARCHAR;
+    return AvroType(LogicalType::VARCHAR);
   } else if (type_name == "bytes") {
-    return LogicalType::BLOB;
+    return AvroType(LogicalType::BLOB);
   } else if (type_name == "int") {
-    return LogicalType::INTEGER;
+    return AvroType(LogicalType::INTEGER);
   } else if (type_name == "long") {
-    return LogicalType::BIGINT;
+    return AvroType(LogicalType::BIGINT);
   } else if (type_name == "float") {
-    return LogicalType::FLOAT;
+    return AvroType(LogicalType::FLOAT);
   } else if (type_name == "double") {
-    return LogicalType::DOUBLE;
+    return AvroType(LogicalType::DOUBLE);
   } else if (type_name == "boolean") {
-    return LogicalType::BOOLEAN;
+    return AvroType(LogicalType::BOOLEAN);
   } else if (type_name == "null") {
-    return LogicalType::SQLNULL;
+    return AvroType(LogicalType::SQLNULL);
   } else if (type_name == "map") {
     throw NotImplementedException("Avro map type not implemented");
   } else if (type_name == "array") {
     throw NotImplementedException("Avro array type not implemented");
   } else if (type_name == "union") {
     auto num_children = avro_schema_union_size(avro_schema);
-    child_list_t<LogicalType> union_children;
+    child_list_t<AvroType> union_children;
     for (idx_t child_idx = 0; child_idx < num_children; child_idx++) {
       auto child_schema = avro_schema_union_branch(avro_schema, child_idx);
       auto child_type = TransformSchema(child_schema);
-      union_children.push_back(std::pair<std::string, LogicalType>(
+      union_children.push_back(std::pair<std::string, AvroType>(
           StringUtil::Format("u%llu", child_idx), std::move(child_type)));
     }
-    return LogicalType::UNION(std::move(union_children));
+    return AvroType(LogicalTypeId::UNION, std::move(union_children));
   } else {
     // a Avro 'record', so a DuckDB STRUCT
     auto num_children = avro_schema_record_size(avro_schema);
-    child_list_t<LogicalType> struct_children;
+    child_list_t<AvroType> struct_children;
     for (idx_t child_idx = 0; child_idx < num_children; child_idx++) {
       auto child_schema =
           avro_schema_record_field_get_by_index(avro_schema, child_idx);
@@ -80,11 +133,11 @@ static LogicalType TransformSchema(avro_schema_t &avro_schema) {
       if (!child_name || strlen(child_name) == 0) {
         throw InvalidInputException("Empty avro field name");
       }
-      struct_children.push_back(std::pair<std::string, LogicalType>(
-          child_name, std::move(child_type)));
+      struct_children.push_back(
+          std::pair<std::string, AvroType>(child_name, std::move(child_type)));
     }
 
-    return LogicalType::STRUCT(std::move(struct_children));
+    return AvroType(LogicalTypeId::STRUCT, std::move(struct_children));
   }
 }
 
@@ -99,42 +152,39 @@ AvroBindFunction(ClientContext &context, TableFunctionBindInput &input,
   }
 
   auto avro_schema = avro_file_reader_get_writer_schema(reader);
-  auto type = TransformSchema(avro_schema);
-  avro_schema_decref(avro_schema);
-  avro_file_reader_close(reader);
+  bind_data->avro_type = TransformSchema(avro_schema);
 
-  bind_data->root_type = type;
+  bind_data->duckdb_type = TransformAvroType(bind_data->avro_type);
+  auto &duckdb_type = bind_data->duckdb_type;
 
-  if (type.id() == LogicalTypeId::STRUCT) {
-    for (idx_t child_idx = 0; child_idx < StructType::GetChildCount(type);
-         child_idx++) {
-      names.push_back(StructType::GetChildName(type, child_idx));
-      return_types.push_back(StructType::GetChildType(type, child_idx));
+  // special handling for root structs, we pull up the entries
+  if (duckdb_type.id() == LogicalTypeId::STRUCT) {
+    for (idx_t child_idx = 0;
+         child_idx < StructType::GetChildCount(duckdb_type); child_idx++) {
+      names.push_back(StructType::GetChildName(duckdb_type, child_idx));
+      return_types.push_back(StructType::GetChildType(duckdb_type, child_idx));
     }
   } else {
     names.push_back(avro_schema_type_name(avro_schema));
-    return_types.push_back(std::move(type));
+    return_types.push_back(std::move(duckdb_type));
   }
+
+  avro_schema_decref(avro_schema);
+  avro_file_reader_close(reader);
 
   return bind_data;
 }
 
-static void TransformValue(avro_value *avro_val, Vector &target,
-                           idx_t out_idx) {
+static void TransformValue(avro_value *avro_val, AvroType &avro_type,
+                           Vector &target, idx_t out_idx) {
 
-  auto &type = target.GetType();
-  switch (type.id()) {
-  case LogicalType::SQLNULL: {
-    FlatVector::Validity(target).SetInvalid(out_idx);
-    break;
-  }
+  switch (avro_type.type) {
   case LogicalType::BOOLEAN: {
     int bool_val;
     if (avro_value_get_boolean(avro_val, &bool_val)) {
       throw InvalidInputException(avro_strerror());
     }
     FlatVector::GetData<uint8_t>(target)[out_idx] = bool_val != 0;
-    break;
   }
   case LogicalType::INTEGER: {
     if (avro_value_get_int(avro_val,
@@ -172,7 +222,7 @@ static void TransformValue(avro_value *avro_val, Vector &target,
     }
     // avro strings are null-terminated
     D_ASSERT(const_char_ptr_cast(str_buf.buf)[str_buf.size - 1] == '\0');
-    if (type.id() == LogicalType::VARCHAR &&
+    if (avro_type.type == LogicalType::VARCHAR &&
         Utf8Proc::Analyze(const_char_ptr_cast(str_buf.buf), str_buf.size - 1) ==
             UnicodeType::INVALID) {
       throw InvalidInputException("Avro file contains invalid unicode");
@@ -189,42 +239,65 @@ static void TransformValue(avro_value *avro_val, Vector &target,
     if (avro_value_get_size(avro_val, &child_count)) {
       throw InvalidInputException(avro_strerror());
     }
+    D_ASSERT(child_count == StructType::GetChildCount(target.GetType()));
+    D_ASSERT(child_count == avro_type.children.size());
+
     for (idx_t child_idx = 0; child_idx < child_count; child_idx++) {
       avro_value child_value;
       if (avro_value_get_by_index(avro_val, child_idx, &child_value, nullptr)) {
         throw InvalidInputException(avro_strerror());
       }
-      TransformValue(&child_value, *StructVector::GetEntries(target)[child_idx],
-                     out_idx);
+      TransformValue(&child_value, avro_type.children[child_idx].second,
+                     *StructVector::GetEntries(target)[child_idx], out_idx);
     }
     break;
   }
+
+  // TODO what about single-child unions in general?? have a test!
   case LogicalTypeId::UNION: {
+
     int discriminant;
     avro_value union_value;
     if (avro_value_get_discriminant(avro_val, &discriminant) ||
         avro_value_get_current_branch(avro_val, &union_value)) {
       throw InvalidInputException(avro_strerror());
     }
-    if (discriminant >= UnionType::GetMemberCount(type)) {
+    if (discriminant >= avro_type.children.size()) {
       throw InvalidInputException("Invalid union tag");
     }
-    for (idx_t union_idx = 0; union_idx < UnionType::GetMemberCount(type);
-         union_idx++) {
-      FlatVector::Validity(UnionVector::GetMember(target, union_idx))
-          .SetInvalid(out_idx);
-    }
 
-    auto &tags = UnionVector::GetTags(target);
-    FlatVector::GetData<union_tag_t>(tags)[out_idx] = discriminant;
-    auto &union_vector = UnionVector::GetMember(target, discriminant);
-    TransformValue(&union_value, union_vector, out_idx);
-    FlatVector::Validity(union_vector).SetValid(out_idx);
+    // if the target is a union, we set everything to null to start with
+    if (target.GetType().id() == LogicalTypeId::UNION) {
+      for (idx_t union_idx = 0;
+           union_idx < UnionType::GetMemberCount(target.GetType());
+           union_idx++) {
+        FlatVector::Validity(UnionVector::GetMember(target, union_idx))
+            .SetInvalid(out_idx);
+      }
+    }
+    if (avro_type.children[discriminant].second.type ==
+        LogicalTypeId::SQLNULL) {
+      // value is null whether its union or not
+      FlatVector::Validity(target).SetInvalid(out_idx);
+    } else {
+      if (target.GetType().id() == LogicalTypeId::UNION) {
+        auto &tags = UnionVector::GetTags(target);
+        // TODO calculate actual discriminant, it will be wrong if null is first
+        FlatVector::GetData<union_tag_t>(tags)[out_idx] = discriminant;
+        auto &union_vector = UnionVector::GetMember(target, discriminant);
+        TransformValue(&union_value, avro_type.children[discriminant].second,
+                       union_vector, out_idx);
+      } else { // directly recurse
+        TransformValue(&union_value, avro_type.children[discriminant].second,
+                       target, out_idx);
+      }
+      FlatVector::Validity(target).SetValid(out_idx);
+    }
 
     break;
   }
   default:
-    throw NotImplementedException(type.ToString());
+    throw NotImplementedException(LogicalTypeIdToString(avro_type.type));
   }
 }
 
@@ -233,7 +306,7 @@ struct AvroGlobalState : GlobalTableFunctionState {
     avro_value_decref(&value);
     avro_file_reader_close(reader);
   }
-  AvroGlobalState(string filename, LogicalType struct_type) {
+  AvroGlobalState(string filename, const LogicalType &duckdb_type) {
     if (avro_file_reader(filename.c_str(), &reader)) {
       throw InvalidInputException(avro_strerror());
     }
@@ -242,12 +315,12 @@ struct AvroGlobalState : GlobalTableFunctionState {
     avro_schema_decref(schema);
     avro_generic_value_new(interface, &value);
     avro_value_iface_decref(interface);
-    struct_vec = make_uniq<Vector>(struct_type);
+    read_vec = make_uniq<Vector>(duckdb_type);
   }
   avro_file_reader_t reader;
   avro_schema_t schema;
   avro_value_t value;
-  unique_ptr<Vector> struct_vec;
+  unique_ptr<Vector> read_vec;
 };
 
 static void AvroTableFunction(ClientContext &context, TableFunctionInput &data,
@@ -256,32 +329,31 @@ static void AvroTableFunction(ClientContext &context, TableFunctionInput &data,
 
   auto &global_state = data.global_state->Cast<AvroGlobalState>();
   idx_t out_idx = 0;
+
   while (avro_file_reader_read_value(global_state.reader,
                                      &global_state.value) == 0) {
-
-    if (bind_data.root_type.id() == LogicalTypeId::STRUCT) {
-      TransformValue(&global_state.value, *global_state.struct_vec, out_idx++);
-    } else {
-      TransformValue(&global_state.value, output.data[0], out_idx++);
-    }
+    TransformValue(&global_state.value, bind_data.avro_type,
+                   *global_state.read_vec, out_idx++);
     if (out_idx == STANDARD_VECTOR_SIZE) {
       break;
     }
   }
 
-  if (bind_data.root_type.id() == LogicalTypeId::STRUCT) {
+  // pull up root struct into output chunk
+  if (bind_data.duckdb_type.id() == LogicalTypeId::STRUCT) {
     for (idx_t col_idx = 0; col_idx < output.ColumnCount(); col_idx++) {
       output.data[col_idx].Reference(
-          *StructVector::GetEntries(*global_state.struct_vec)[col_idx]);
+          *StructVector::GetEntries(*global_state.read_vec)[col_idx]);
     }
   }
+
   output.SetCardinality(out_idx);
 }
 
 static unique_ptr<GlobalTableFunctionState>
 AvroGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
   auto &bind_data = input.bind_data->Cast<AvroBindData>();
-  return make_uniq<AvroGlobalState>(bind_data.filename, bind_data.root_type);
+  return make_uniq<AvroGlobalState>(bind_data.filename, bind_data.duckdb_type);
 }
 
 static void LoadInternal(DatabaseInstance &instance) {

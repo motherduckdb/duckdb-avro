@@ -15,31 +15,42 @@ last_name	VARCHAR
 email	VARCHAR
 gender	VARCHAR
 ip_address	VARCHAR
-cc	UNION(u0 INTEGER, u1 BIGINT)
+cc	BIGINT
 country	VARCHAR
 birthdate	VARCHAR
-salary	UNION(u0 INTEGER, u1 DOUBLE)
+salary	DOUBLE
 title	VARCHAR
 comments	VARCHAR
 
-query I
-FROM read_avro('test/userdata1.avro') SELECT first_name ORDER BY registration_dttm LIMIT 10;
+
+query III
+FROM read_avro('test/userdata1.avro') SELECT first_name, cc, salary ORDER BY registration_dttm LIMIT 10;
 ----
-Lillian
-Chris
-Nicholas
-Johnny
-Bruce
-Heather
-Larry
-Roy
-James
-Sean
+Lillian	201713786459078	282503.77
+Chris	5602220700741429	NULL
+Nicholas	3575506969751259	192076.79
+Johnny	5602239825516409	169429.76
+Bruce	NULL	118244.57
+Heather	NULL	164117.18
+Larry	3531208154739438	139177.38
+Roy	3589146577885209	262816.87
+James	3589416270039051	211553.57
+Sean	NULL	NULL
+
 
 query I
 FROM read_avro('test/userdata1.avro') SELECT COUNT(*)
 ----
 1000
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/users.avro'));
+----
+name	VARCHAR
+favorite_number	INTEGER
+favorite_color	VARCHAR
+
 
 # example from readme
 query III
