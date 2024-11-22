@@ -18,13 +18,17 @@ namespace duckdb {
 struct AvroType {
   AvroType() : type(LogicalTypeId::INVALID) {}
 
-  AvroType(LogicalTypeId type_p, child_list_t<AvroType> children_p = {})
-      : type(type_p), children(children_p) {}
+  AvroType(LogicalTypeId type_p, child_list_t<AvroType> children_p = {},
+           unordered_map<idx_t, optional_idx> union_child_map_p = {})
+      : type(type_p), children(children_p), union_child_map(union_child_map_p) {
+  }
   LogicalTypeId type;
   child_list_t<AvroType> children;
+  unordered_map<idx_t, optional_idx> union_child_map;
 
   bool operator==(const AvroType &other) const {
-    return type == other.type && children == other.children;
+    return type == other.type && children == other.children &&
+           union_child_map == other.union_child_map;
   }
 };
 
@@ -114,13 +118,19 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
   } else if (type_name == "union") {
     auto num_children = avro_schema_union_size(avro_schema);
     child_list_t<AvroType> union_children;
+    idx_t non_null_child_idx = 0;
+    unordered_map<idx_t, optional_idx> union_child_map;
     for (idx_t child_idx = 0; child_idx < num_children; child_idx++) {
       auto child_schema = avro_schema_union_branch(avro_schema, child_idx);
       auto child_type = TransformSchema(child_schema);
       union_children.push_back(std::pair<std::string, AvroType>(
           StringUtil::Format("u%llu", child_idx), std::move(child_type)));
+      if (child_type.type != LogicalTypeId::SQLNULL) {
+        union_child_map[child_idx] = non_null_child_idx++;
+      }
     }
-    return AvroType(LogicalTypeId::UNION, std::move(union_children));
+    return AvroType(LogicalTypeId::UNION, std::move(union_children),
+                    union_child_map);
   } else {
     // a Avro 'record', so a DuckDB STRUCT
     auto num_children = avro_schema_record_size(avro_schema);
@@ -133,6 +143,7 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
       if (!child_name || strlen(child_name) == 0) {
         throw InvalidInputException("Empty avro field name");
       }
+
       struct_children.push_back(
           std::pair<std::string, AvroType>(child_name, std::move(child_type)));
     }
@@ -279,18 +290,12 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
 
     if (avro_type.children[discriminant].second.type !=
         LogicalTypeId::SQLNULL) {
+      auto duckdb_child_index =
+          avro_type.union_child_map[discriminant].GetIndex();
       if (target.GetType().id() == LogicalTypeId::UNION) {
         auto &tags = UnionVector::GetTags(target);
-        // TODO this is excessive for every value
-        int duckdb_struct_idx = 0;
-        for (idx_t child_idx = 0; child_idx < discriminant; child_idx++) {
-          if (avro_type.children[discriminant].second.type !=
-              LogicalTypeId::SQLNULL) {
-            duckdb_struct_idx++;
-          }
-        }
-        FlatVector::GetData<union_tag_t>(tags)[out_idx] = duckdb_struct_idx;
-        auto &union_vector = UnionVector::GetMember(target, duckdb_struct_idx);
+        FlatVector::GetData<union_tag_t>(tags)[out_idx] = duckdb_child_index;
+        auto &union_vector = UnionVector::GetMember(target, duckdb_child_index);
         TransformValue(&union_value, avro_type.children[discriminant].second,
                        union_vector, out_idx);
       } else { // directly recurse, we have dissolved the union
