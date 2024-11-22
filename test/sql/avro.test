@@ -4,13 +4,26 @@
 
 require avro
 
+# usual suspect, the userdata1 file
 query II
 select column_name, column_type from (DESCRIBE FROM read_avro('test/userdata1.avro'));
 ----
-kylosample	STRUCT(registration_dttm VARCHAR, id BIGINT, first_name VARCHAR, last_name VARCHAR, email VARCHAR, gender VARCHAR, ip_address VARCHAR, cc UNION(u0 INTEGER, u1 BIGINT), country VARCHAR, birthdate VARCHAR, salary UNION(u0 INTEGER, u1 DOUBLE), title VARCHAR, "comments" VARCHAR)
+registration_dttm	VARCHAR
+id	BIGINT
+first_name	VARCHAR
+last_name	VARCHAR
+email	VARCHAR
+gender	VARCHAR
+ip_address	VARCHAR
+cc	UNION(u0 INTEGER, u1 BIGINT)
+country	VARCHAR
+birthdate	VARCHAR
+salary	UNION(u0 INTEGER, u1 DOUBLE)
+title	VARCHAR
+comments	VARCHAR
 
 query I
-FROM (FROM read_avro('test/userdata1.avro') SELECT kylosample.*) SELECT first_name ORDER BY registration_dttm LIMIT 10;
+FROM read_avro('test/userdata1.avro') SELECT first_name ORDER BY registration_dttm LIMIT 10;
 ----
 Lillian
 Chris
@@ -27,3 +40,10 @@ query I
 FROM read_avro('test/userdata1.avro') SELECT COUNT(*)
 ----
 1000
+
+# example from readme
+query III
+FROM read_avro('test/users.avro')
+----
+Alyssa	256	NULL
+Ben	7	red

@@ -16,15 +16,18 @@ namespace duckdb {
 struct AvroBindData : FunctionData {
 
   string filename;
+  LogicalType root_type;
 
   bool Equals(const FunctionData &other_p) const {
     const AvroBindData &other = static_cast<const AvroBindData &>(other_p);
-    return filename == other.filename;
+    return filename == other.filename && root_type == other.root_type;
   }
 
   unique_ptr<FunctionData> Copy() const {
     auto bind_data = make_uniq<AvroBindData>();
     bind_data->filename = filename;
+    bind_data->root_type = root_type;
+
     return bind_data;
   }
 };
@@ -97,12 +100,21 @@ AvroBindFunction(ClientContext &context, TableFunctionBindInput &input,
 
   auto avro_schema = avro_file_reader_get_writer_schema(reader);
   auto type = TransformSchema(avro_schema);
-
-  names.push_back(avro_schema_type_name(avro_schema));
-  return_types.push_back(std::move(type));
-
   avro_schema_decref(avro_schema);
   avro_file_reader_close(reader);
+
+  bind_data->root_type = type;
+
+  if (type.id() == LogicalTypeId::STRUCT) {
+    for (idx_t child_idx = 0; child_idx < StructType::GetChildCount(type);
+         child_idx++) {
+      names.push_back(StructType::GetChildName(type, child_idx));
+      return_types.push_back(StructType::GetChildType(type, child_idx));
+    }
+  } else {
+    names.push_back(avro_schema_type_name(avro_schema));
+    return_types.push_back(std::move(type));
+  }
 
   return bind_data;
 }
@@ -113,6 +125,7 @@ static void TransformValue(avro_value *avro_val, Vector &target,
   auto &type = target.GetType();
   switch (type.id()) {
   case LogicalType::SQLNULL: {
+    FlatVector::Validity(target).SetInvalid(out_idx);
     break;
   }
   case LogicalType::BOOLEAN: {
@@ -217,11 +230,10 @@ static void TransformValue(avro_value *avro_val, Vector &target,
 
 struct AvroGlobalState : GlobalTableFunctionState {
   ~AvroGlobalState() {
-    // TODO why does this crash
-    // avro_value_decref(&value);
-    // avro_file_reader_close(reader);
+    avro_value_decref(&value);
+    avro_file_reader_close(reader);
   }
-  AvroGlobalState(string filename) {
+  AvroGlobalState(string filename, LogicalType struct_type) {
     if (avro_file_reader(filename.c_str(), &reader)) {
       throw InvalidInputException(avro_strerror());
     }
@@ -230,25 +242,37 @@ struct AvroGlobalState : GlobalTableFunctionState {
     avro_schema_decref(schema);
     avro_generic_value_new(interface, &value);
     avro_value_iface_decref(interface);
+    struct_vec = make_uniq<Vector>(struct_type);
   }
   avro_file_reader_t reader;
   avro_schema_t schema;
   avro_value_t value;
+  unique_ptr<Vector> struct_vec;
 };
 
 static void AvroTableFunction(ClientContext &context, TableFunctionInput &data,
                               DataChunk &output) {
+  auto bind_data = data.bind_data->Cast<AvroBindData>();
 
-  D_ASSERT(output.data.size() == 1);
-  D_ASSERT(output.GetTypes().size() == 1);
-  D_ASSERT(output.GetTypes()[0].id() == LogicalTypeId::STRUCT);
-  auto global_state = data.global_state->Cast<AvroGlobalState>();
+  auto &global_state = data.global_state->Cast<AvroGlobalState>();
   idx_t out_idx = 0;
   while (avro_file_reader_read_value(global_state.reader,
                                      &global_state.value) == 0) {
-    TransformValue(&global_state.value, output.data[0], out_idx++);
+
+    if (bind_data.root_type.id() == LogicalTypeId::STRUCT) {
+      TransformValue(&global_state.value, *global_state.struct_vec, out_idx++);
+    } else {
+      TransformValue(&global_state.value, output.data[0], out_idx++);
+    }
     if (out_idx == STANDARD_VECTOR_SIZE) {
       break;
+    }
+  }
+
+  if (bind_data.root_type.id() == LogicalTypeId::STRUCT) {
+    for (idx_t col_idx = 0; col_idx < output.ColumnCount(); col_idx++) {
+      output.data[col_idx].Reference(
+          *StructVector::GetEntries(*global_state.struct_vec)[col_idx]);
     }
   }
   output.SetCardinality(out_idx);
@@ -256,8 +280,8 @@ static void AvroTableFunction(ClientContext &context, TableFunctionInput &data,
 
 static unique_ptr<GlobalTableFunctionState>
 AvroGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
-  return make_uniq<AvroGlobalState>(
-      input.bind_data->Cast<AvroBindData>().filename);
+  auto &bind_data = input.bind_data->Cast<AvroBindData>();
+  return make_uniq<AvroGlobalState>(bind_data.filename, bind_data.root_type);
 }
 
 static void LoadInternal(DatabaseInstance &instance) {
