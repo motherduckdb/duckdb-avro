@@ -139,6 +139,22 @@ c9db7c67a6acb5a65c78b19e9e01d7b0
 ac441296bcbd44442301204a8f061cf2
 
 
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/string_array.avro'));
+----
+string_arr	VARCHAR[]
+
+query I
+FROM read_avro('test/string_array.avro')
+----
+[Hello, World]
+[this]
+[]
+[is, cool, array]
+[data]
+
+
 statement error
 from read_avro('does-not-exist.avro')
 ----

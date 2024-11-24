@@ -72,6 +72,8 @@ static LogicalType TransformAvroType(const AvroType &avro_type) {
     }
     return LogicalType::STRUCT(std::move(children));
   }
+  case LogicalTypeId::LIST:
+    return LogicalType::LIST(TransformAvroType(avro_type.children[0].second));
   case LogicalTypeId::UNION: {
     for (auto &child : avro_type.children) {
       if (child.second.duckdb_type == LogicalTypeId::SQLNULL) {
@@ -85,8 +87,6 @@ static LogicalType TransformAvroType(const AvroType &avro_type) {
     }
     return LogicalType::UNION(std::move(children));
   }
-  case LogicalTypeId::SQLNULL:
-    return LogicalType::SQLNULL;
   default:
     return LogicalType(avro_type.duckdb_type);
   }
@@ -160,15 +160,21 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
   case AVRO_FIXED: {
     return AvroType(AVRO_FIXED, LogicalType::BLOB);
   }
+  case AVRO_ARRAY: {
+    auto child_schema = avro_schema_array_items(avro_schema);
+    auto child_type = TransformSchema(child_schema);
+    child_list_t<AvroType> list_children;
+    list_children.push_back(
+        std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
+    return AvroType(AVRO_ARRAY, LogicalTypeId::LIST, std::move(list_children));
+  }
   default:
     throw NotImplementedException("Unknown Avro Type %s",
                                   avro_schema_type_name(avro_schema));
   }
 
-  // TODO two types to go
-
-  // AVRO_MAP,
-  // AVRO_ARRAY,
+  // TODO one type to go
+  // AVRO_MAP
   // AVRO_LINK no idea what this is
 }
 
@@ -299,7 +305,6 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
     break;
   }
   case LogicalTypeId::STRUCT: {
-    child_list_t<Value> children;
     size_t child_count;
     if (avro_value_get_size(avro_val, &child_count)) {
       throw InvalidInputException(avro_strerror());
@@ -385,6 +390,31 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
     }
     break;
   }
+
+  case LogicalTypeId::LIST: {
+    size_t list_len;
+
+    if (avro_value_get_size(avro_val, &list_len)) {
+      throw InvalidInputException(avro_strerror());
+    }
+    auto &child_vector = ListVector::GetEntry(target);
+    auto child_offset = ListVector::GetListSize(target);
+    ListVector::SetListSize(target, child_offset + list_len);
+    for (idx_t child_idx = 0; child_idx < list_len; child_idx++) {
+      avro_value_t child_value;
+      if (avro_value_get_by_index(avro_val, child_idx, &child_value, nullptr)) {
+        throw InvalidInputException(avro_strerror());
+      }
+      TransformValue(&child_value, avro_type.children[0].second, child_vector,
+                     child_offset + child_idx);
+    }
+    auto list_vector_data = ListVector::GetData(target);
+    list_vector_data[out_idx].length = list_len;
+    list_vector_data[out_idx].offset = child_offset;
+
+    break;
+  }
+
   default:
     throw NotImplementedException(avro_type.duckdb_type.ToString());
   }

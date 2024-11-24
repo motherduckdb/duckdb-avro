@@ -16,13 +16,6 @@ from avro.io import DatumReader, DatumWriter
 # }
 
 
-# array
-
-# {
-#   "type": "array",
-#   "items" : "string",
-#   "default": []
-# }
 
 # map
 
@@ -270,5 +263,57 @@ reader = DataFileReader(open("fixed.avro", "rb"), DatumReader())
 for user in reader:
     print(user)
 reader.close()
+
+
+
+
+
+
+
+
+
+json_schema = """
+{ "type": "record",
+ "name": "root",
+     "fields": [
+        {
+            "name": "string_arr",
+            "type": {
+              "type": "array",
+              "items" : "string",
+              "default": []
+            }
+        }
+    ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("string_array.avro", "wb"), DatumWriter(), schema)
+
+
+
+writer.append({ 'string_arr' : ['Hello' ,'World']})
+writer.append({ 'string_arr' : ['this']})
+writer.append({ 'string_arr' : []})
+writer.append({ 'string_arr' : ['is', 'cool','array']})
+writer.append({ 'string_arr' : ['data']})
+
+
+
+writer.close()
+
+reader = DataFileReader(open("string_array.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+# array
+
+
+
 
 
