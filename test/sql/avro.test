@@ -22,7 +22,6 @@ salary	DOUBLE
 title	VARCHAR
 comments	VARCHAR
 
-
 query III
 FROM read_avro('test/userdata1.avro') SELECT first_name, cc, salary ORDER BY registration_dttm LIMIT 10;
 ----
@@ -37,12 +36,10 @@ Roy	3589146577885209	262816.87
 James	3589416270039051	211553.57
 Sean	NULL	NULL
 
-
 query I
 FROM read_avro('test/userdata1.avro') SELECT COUNT(*)
 ----
 1000
-
 
 query II
 select column_name, column_type from (DESCRIBE FROM read_avro('test/users.avro'));
@@ -51,14 +48,12 @@ name	VARCHAR
 favorite_number	INTEGER
 favorite_color	VARCHAR
 
-
 # example from readme
 query III
 FROM read_avro('test/users.avro')
 ----
 Alyssa	256	NULL
 Ben	7	red
-
 
 query II
 select column_name, column_type from (DESCRIBE FROM read_avro('test/single-union.avro'));
@@ -70,8 +65,6 @@ query I
 FROM read_avro('test/single-union.avro')
 ----
 42
-
-
 
 query II
 select column_name, column_type from (DESCRIBE FROM read_avro('test/null_first.avro'));
@@ -97,7 +90,31 @@ FROM read_avro('test/null_last.avro')
 42
 NULL
 
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/primitive_types.avro'));
+----
+null	INTEGER
+boolean	BOOLEAN
+int	INTEGER
+long	BIGINT
+float	FLOAT
+double	DOUBLE
+bytes	BLOB
+string	VARCHAR
+
+# example from readme
+query IIIIIIII
+FROM read_avro('test/primitive_types.avro')
+----
+NULL	0	-2147483648	-9223372036854775808	-3.4028235e+38	-1.7976931348623157e+308	thisisalongblob\x00withnullbytes	🦆🦆🦆🦆🦆🦆
+NULL	1	2147483647	9223372036854775807	3.4028235e+38	1.7976931348623157e+308	\x00\x00\x00a	goo
+
 statement error
 from read_avro('does-not-exist.avro')
 ----
 not found
+
+statement error
+from read_avro('CMakeLists.txt')
+----
+Incorrect Avro container file magic number

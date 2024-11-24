@@ -83,7 +83,7 @@ static LogicalType TransformAvroType(const AvroType &avro_type) {
     return LogicalType::UNION(std::move(children));
   }
   case LogicalTypeId::SQLNULL:
-    throw InternalException("This should not happen");
+    return LogicalType::SQLNULL;
   default:
     return LogicalType(avro_type.type);
   }
@@ -193,12 +193,17 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
                            Vector &target, idx_t out_idx) {
 
   switch (avro_type.type) {
+  case LogicalType::SQLNULL: {
+    FlatVector::Validity(target).SetInvalid(out_idx);
+    break;
+  }
   case LogicalType::BOOLEAN: {
     int bool_val;
     if (avro_value_get_boolean(avro_val, &bool_val)) {
       throw InvalidInputException(avro_strerror());
     }
     FlatVector::GetData<uint8_t>(target)[out_idx] = bool_val != 0;
+    break;
   }
   case LogicalType::INTEGER: {
     if (avro_value_get_int(avro_val,
@@ -228,7 +233,18 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
     }
     break;
   }
-  case LogicalType::BLOB:
+  case LogicalType::BLOB: {
+    avro_wrapped_buffer blob_buf = AVRO_WRAPPED_BUFFER_EMPTY;
+    if (avro_value_grab_bytes(avro_val, &blob_buf)) {
+      throw InvalidInputException(avro_strerror());
+    }
+    FlatVector::GetData<string_t>(target)[out_idx] =
+        StringVector::AddStringOrBlob(target, const_char_ptr_cast(blob_buf.buf),
+                                      blob_buf.size);
+    blob_buf.free(&blob_buf);
+    break;
+  }
+
   case LogicalType::VARCHAR: {
     avro_wrapped_buffer str_buf = AVRO_WRAPPED_BUFFER_EMPTY;
     if (avro_value_grab_string(avro_val, &str_buf)) {
@@ -236,14 +252,12 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
     }
     // avro strings are null-terminated
     D_ASSERT(const_char_ptr_cast(str_buf.buf)[str_buf.size - 1] == '\0');
-    if (avro_type.type == LogicalType::VARCHAR &&
-        Utf8Proc::Analyze(const_char_ptr_cast(str_buf.buf), str_buf.size - 1) ==
-            UnicodeType::INVALID) {
-      throw InvalidInputException("Avro file contains invalid unicode");
+    if (Utf8Proc::Analyze(const_char_ptr_cast(str_buf.buf), str_buf.size - 1) ==
+        UnicodeType::INVALID) {
+      throw InvalidInputException("Avro file contains invalid unicode string");
     }
-    FlatVector::GetData<string_t>(target)[out_idx] =
-        StringVector::AddStringOrBlob(target, const_char_ptr_cast(str_buf.buf),
-                                      str_buf.size - 1);
+    FlatVector::GetData<string_t>(target)[out_idx] = StringVector::AddString(
+        target, const_char_ptr_cast(str_buf.buf), str_buf.size - 1);
     str_buf.free(&str_buf);
     break;
   }
