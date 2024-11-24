@@ -16,18 +16,21 @@
 namespace duckdb {
 
 struct AvroType {
-  AvroType() : type(LogicalTypeId::INVALID) {}
+  AvroType() : duckdb_type(LogicalType::INVALID) {}
 
-  AvroType(LogicalTypeId type_p, child_list_t<AvroType> children_p = {},
+  AvroType(avro_type_t avro_type_p, LogicalType duckdb_type_p,
+           child_list_t<AvroType> children_p = {},
            unordered_map<idx_t, optional_idx> union_child_map_p = {})
-      : type(type_p), children(children_p), union_child_map(union_child_map_p) {
-  }
-  LogicalTypeId type;
+      : duckdb_type(duckdb_type_p), avro_type(avro_type_p),
+        children(children_p), union_child_map(union_child_map_p) {}
+  LogicalType duckdb_type;
+  avro_type_t avro_type;
   child_list_t<AvroType> children;
   unordered_map<idx_t, optional_idx> union_child_map;
 
   bool operator==(const AvroType &other) const {
-    return type == other.type && children == other.children &&
+    return duckdb_type == other.duckdb_type && avro_type == other.avro_type &&
+           children == other.children &&
            union_child_map == other.union_child_map;
   }
 };
@@ -61,7 +64,7 @@ struct AvroBindData : FunctionData {
 static LogicalType TransformAvroType(const AvroType &avro_type) {
   child_list_t<LogicalType> children;
 
-  switch (avro_type.type) {
+  switch (avro_type.duckdb_type.id()) {
   case LogicalTypeId::STRUCT: {
     for (auto &child : avro_type.children) {
       children.push_back(std::pair<std::string, LogicalType>(
@@ -71,7 +74,7 @@ static LogicalType TransformAvroType(const AvroType &avro_type) {
   }
   case LogicalTypeId::UNION: {
     for (auto &child : avro_type.children) {
-      if (child.second.type == LogicalTypeId::SQLNULL) {
+      if (child.second.duckdb_type == LogicalTypeId::SQLNULL) {
         continue;
       }
       children.push_back(std::pair<std::string, LogicalType>(
@@ -85,37 +88,29 @@ static LogicalType TransformAvroType(const AvroType &avro_type) {
   case LogicalTypeId::SQLNULL:
     return LogicalType::SQLNULL;
   default:
-    return LogicalType(avro_type.type);
+    return LogicalType(avro_type.duckdb_type);
   }
 }
 
 static AvroType TransformSchema(avro_schema_t &avro_schema) {
-  auto raw_type_name = avro_schema_type_name(avro_schema);
-  if (!raw_type_name || strlen(raw_type_name) == 0) {
-    throw InvalidInputException("Empty avro type name");
-  }
-  auto type_name = string(raw_type_name);
-  if (type_name == "string") {
-    return AvroType(LogicalType::VARCHAR);
-  } else if (type_name == "bytes") {
-    return AvroType(LogicalType::BLOB);
-  } else if (type_name == "int") {
-    return AvroType(LogicalType::INTEGER);
-  } else if (type_name == "long") {
-    return AvroType(LogicalType::BIGINT);
-  } else if (type_name == "float") {
-    return AvroType(LogicalType::FLOAT);
-  } else if (type_name == "double") {
-    return AvroType(LogicalType::DOUBLE);
-  } else if (type_name == "boolean") {
-    return AvroType(LogicalType::BOOLEAN);
-  } else if (type_name == "null") {
-    return AvroType(LogicalType::SQLNULL);
-  } else if (type_name == "map") {
-    throw NotImplementedException("Avro map type not implemented");
-  } else if (type_name == "array") {
-    throw NotImplementedException("Avro array type not implemented");
-  } else if (type_name == "union") {
+  switch (avro_typeof(avro_schema)) {
+  case AVRO_NULL:
+    return AvroType(AVRO_NULL, LogicalType::SQLNULL);
+  case AVRO_BOOLEAN:
+    return AvroType(AVRO_BOOLEAN, LogicalType::BOOLEAN);
+  case AVRO_INT32:
+    return AvroType(AVRO_INT32, LogicalType::INTEGER);
+  case AVRO_INT64:
+    return AvroType(AVRO_INT64, LogicalType::BIGINT);
+  case AVRO_FLOAT:
+    return AvroType(AVRO_FLOAT, LogicalType::FLOAT);
+  case AVRO_DOUBLE:
+    return AvroType(AVRO_DOUBLE, LogicalType::DOUBLE);
+  case AVRO_BYTES:
+    return AvroType(AVRO_BYTES, LogicalType::BLOB);
+  case AVRO_STRING:
+    return AvroType(AVRO_STRING, LogicalType::VARCHAR);
+  case AVRO_UNION: {
     auto num_children = avro_schema_union_size(avro_schema);
     child_list_t<AvroType> union_children;
     idx_t non_null_child_idx = 0;
@@ -125,14 +120,14 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
       auto child_type = TransformSchema(child_schema);
       union_children.push_back(std::pair<std::string, AvroType>(
           StringUtil::Format("u%llu", child_idx), std::move(child_type)));
-      if (child_type.type != LogicalTypeId::SQLNULL) {
+      if (child_type.duckdb_type != LogicalTypeId::SQLNULL) {
         union_child_map[child_idx] = non_null_child_idx++;
       }
     }
-    return AvroType(LogicalTypeId::UNION, std::move(union_children),
+    return AvroType(AVRO_UNION, LogicalTypeId::UNION, std::move(union_children),
                     union_child_map);
-  } else {
-    // a Avro 'record', so a DuckDB STRUCT
+  }
+  case AVRO_RECORD: {
     auto num_children = avro_schema_record_size(avro_schema);
     child_list_t<AvroType> struct_children;
     for (idx_t child_idx = 0; child_idx < num_children; child_idx++) {
@@ -148,8 +143,33 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
           std::pair<std::string, AvroType>(child_name, std::move(child_type)));
     }
 
-    return AvroType(LogicalTypeId::STRUCT, std::move(struct_children));
+    return AvroType(AVRO_RECORD, LogicalTypeId::STRUCT,
+                    std::move(struct_children));
   }
+  case AVRO_ENUM: {
+    auto size = avro_schema_enum_number_of_symbols(avro_schema);
+    Vector levels(LogicalType::VARCHAR, size);
+    auto levels_data = FlatVector::GetData<string_t>(levels);
+    for (idx_t enum_idx = 0; enum_idx < size; enum_idx++) {
+      levels_data[enum_idx] = StringVector::AddString(
+          levels, avro_schema_enum_get(avro_schema, enum_idx));
+    }
+    levels.Verify(size);
+    return AvroType(AVRO_ENUM, LogicalType::ENUM(levels, size));
+  }
+  case AVRO_FIXED: {
+    return AvroType(AVRO_FIXED, LogicalType::BLOB);
+  }
+  default:
+    throw NotImplementedException("Unknown Avro Type %s",
+                                  avro_schema_type_name(avro_schema));
+  }
+
+  // TODO two types to go
+
+  // AVRO_MAP,
+  // AVRO_ARRAY,
+  // AVRO_LINK no idea what this is
 }
 
 static unique_ptr<FunctionData>
@@ -192,12 +212,12 @@ AvroBindFunction(ClientContext &context, TableFunctionBindInput &input,
 static void TransformValue(avro_value *avro_val, AvroType &avro_type,
                            Vector &target, idx_t out_idx) {
 
-  switch (avro_type.type) {
-  case LogicalType::SQLNULL: {
+  switch (avro_type.duckdb_type.id()) {
+  case LogicalTypeId::SQLNULL: {
     FlatVector::Validity(target).SetInvalid(out_idx);
     break;
   }
-  case LogicalType::BOOLEAN: {
+  case LogicalTypeId::BOOLEAN: {
     int bool_val;
     if (avro_value_get_boolean(avro_val, &bool_val)) {
       throw InvalidInputException(avro_strerror());
@@ -205,47 +225,64 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
     FlatVector::GetData<uint8_t>(target)[out_idx] = bool_val != 0;
     break;
   }
-  case LogicalType::INTEGER: {
+  case LogicalTypeId::INTEGER: {
     if (avro_value_get_int(avro_val,
                            &FlatVector::GetData<int32_t>(target)[out_idx])) {
       throw InvalidInputException(avro_strerror());
     }
     break;
   }
-  case LogicalType::BIGINT: {
+  case LogicalTypeId::BIGINT: {
     if (avro_value_get_long(avro_val,
                             &FlatVector::GetData<int64_t>(target)[out_idx])) {
       throw InvalidInputException(avro_strerror());
     }
     break;
   }
-  case LogicalType::FLOAT: {
+  case LogicalTypeId::FLOAT: {
     if (avro_value_get_float(avro_val,
                              &FlatVector::GetData<float>(target)[out_idx])) {
       throw InvalidInputException(avro_strerror());
     }
     break;
   }
-  case LogicalType::DOUBLE: {
+  case LogicalTypeId::DOUBLE: {
     if (avro_value_get_double(avro_val,
                               &FlatVector::GetData<double>(target)[out_idx])) {
       throw InvalidInputException(avro_strerror());
     }
     break;
   }
-  case LogicalType::BLOB: {
-    avro_wrapped_buffer blob_buf = AVRO_WRAPPED_BUFFER_EMPTY;
-    if (avro_value_grab_bytes(avro_val, &blob_buf)) {
-      throw InvalidInputException(avro_strerror());
+  case LogicalTypeId::BLOB:
+    switch (avro_type.avro_type) {
+    case AVRO_FIXED: {
+      size_t fixed_size;
+      const void *fixed_data;
+      if (avro_value_get_fixed(avro_val, &fixed_data, &fixed_size)) {
+        throw InvalidInputException(avro_strerror());
+      }
+      FlatVector::GetData<string_t>(target)[out_idx] =
+          StringVector::AddStringOrBlob(target, const_char_ptr_cast(fixed_data),
+                                        fixed_size);
+      break;
     }
-    FlatVector::GetData<string_t>(target)[out_idx] =
-        StringVector::AddStringOrBlob(target, const_char_ptr_cast(blob_buf.buf),
-                                      blob_buf.size);
-    blob_buf.free(&blob_buf);
+    case AVRO_BYTES: {
+      avro_wrapped_buffer blob_buf = AVRO_WRAPPED_BUFFER_EMPTY;
+      if (avro_value_grab_bytes(avro_val, &blob_buf)) {
+        throw InvalidInputException(avro_strerror());
+      }
+      FlatVector::GetData<string_t>(target)[out_idx] =
+          StringVector::AddStringOrBlob(
+              target, const_char_ptr_cast(blob_buf.buf), blob_buf.size);
+      blob_buf.free(&blob_buf);
+      break;
+    }
+    default:
+      throw NotImplementedException("Unknown Avro Type %s");
+    }
     break;
-  }
 
-  case LogicalType::VARCHAR: {
+  case LogicalTypeId::VARCHAR: {
     avro_wrapped_buffer str_buf = AVRO_WRAPPED_BUFFER_EMPTY;
     if (avro_value_grab_string(avro_val, &str_buf)) {
       throw InvalidInputException(avro_strerror());
@@ -282,7 +319,6 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
   }
 
   case LogicalTypeId::UNION: {
-
     int discriminant;
     avro_value union_value;
     if (avro_value_get_discriminant(avro_val, &discriminant) ||
@@ -304,7 +340,7 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
     }
     FlatVector::Validity(target).SetInvalid(out_idx);
 
-    if (avro_type.children[discriminant].second.type !=
+    if (avro_type.children[discriminant].second.duckdb_type !=
         LogicalTypeId::SQLNULL) {
       auto duckdb_child_index =
           avro_type.union_child_map[discriminant].GetIndex();
@@ -323,8 +359,34 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
 
     break;
   }
+  case LogicalTypeId::ENUM: {
+    auto enum_type = EnumType::GetPhysicalType(target.GetType());
+    int enum_val;
+
+    if (avro_value_get_enum(avro_val, &enum_val)) {
+      throw InvalidInputException(avro_strerror());
+    }
+    if (enum_val < 0 || enum_val >= EnumType::GetSize(target.GetType())) {
+      throw InvalidInputException("Enum value out of range");
+    }
+
+    switch (enum_type) {
+    case PhysicalType::UINT8:
+      FlatVector::GetData<uint8_t>(target)[out_idx] = enum_val;
+      break;
+    case PhysicalType::UINT16:
+      FlatVector::GetData<uint16_t>(target)[out_idx] = enum_val;
+      break;
+    case PhysicalType::UINT32:
+      FlatVector::GetData<uint32_t>(target)[out_idx] = enum_val;
+      break;
+    default:
+      throw InternalException("Unsupported Enum Internal Type");
+    }
+    break;
+  }
   default:
-    throw NotImplementedException(LogicalTypeIdToString(avro_type.type));
+    throw NotImplementedException(avro_type.duckdb_type.ToString());
   }
 }
 

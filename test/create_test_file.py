@@ -15,13 +15,6 @@ from avro.io import DatumReader, DatumWriter
 #   ]
 # }
 
-# enum
-
-# {
-#   "type": "enum",
-#   "name": "Suit",
-#   "symbols" : ["SPADES", "HEARTS", "DIAMONDS", "CLUBS"]
-# }
 
 # array
 
@@ -38,10 +31,6 @@ from avro.io import DatumReader, DatumWriter
 #   "values" : "long",
 #   "default": {}
 # }
-
-# union
-
-# ["null", "LongList"]
 
 json_schema = """
 {"namespace": "example.avro",
@@ -167,14 +156,6 @@ for user in reader:
 reader.close()
 
 
-
-# float: single precision (32-bit) IEEE 754 floating-point number
-# double: double precision (64-bit) IEEE 754 floating-point number
-# bytes: sequence of 8-bit unsigned bytes
-# string: unicode character sequence
-
-
-
 json_schema = """
 { "type": "record",
  "name": "root",
@@ -207,3 +188,87 @@ reader = DataFileReader(open("primitive_types.avro", "rb"), DatumReader())
 for user in reader:
     print(user)
 reader.close()
+
+
+
+json_schema = """
+{
+    "type": "record",
+    "name": "MySchema",
+    "namespace": "com.company",
+    "fields": [
+        {
+            "name": "color",
+            "type": {
+                "type": "enum",
+                "name": "Color",
+                "symbols": [
+                    "UNKNOWN",
+                    "GREEN",
+                    "RED"
+                ]
+            },
+            "default": "UNKNOWN"
+        }
+    ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("enum.avro", "wb"), DatumWriter(), schema)
+
+
+
+writer.append({ 'color': 'GREEN'})
+writer.append({ 'color': 'GREEN'})
+writer.append({ 'color': 'RED'})
+writer.append({ 'color': 'UNKNOWN'})
+writer.append({ 'color': 'UNKNOWN'})
+
+writer.close()
+
+reader = DataFileReader(open("enum.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
+
+
+
+json_schema = """
+{ "type": "record",
+ "name": "root",
+     "fields": [
+        {
+            "name": "md5",
+            "type": {"type": "fixed", "size": 32, "name": "md5"}
+        }
+    ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("fixed.avro", "wb"), DatumWriter(), schema)
+
+
+
+writer.append({ 'md5' : '47336f3f2497b70ac046cf23298e20a7'.encode()})
+writer.append({ 'md5' : 'a789a15a7ff7db4a0d1b186363ef0771'.encode()})
+writer.append({ 'md5' : 'c9db7c67a6acb5a65c78b19e9e01d7b0'.encode()})
+writer.append({ 'md5' : 'ac441296bcbd44442301204a8f061cf2'.encode()})
+
+
+
+writer.close()
+
+reader = DataFileReader(open("fixed.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+

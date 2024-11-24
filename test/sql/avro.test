@@ -109,6 +109,36 @@ FROM read_avro('test/primitive_types.avro')
 NULL	0	-2147483648	-9223372036854775808	-3.4028235e+38	-1.7976931348623157e+308	thisisalongblob\x00withnullbytes	🦆🦆🦆🦆🦆🦆
 NULL	1	2147483647	9223372036854775807	3.4028235e+38	1.7976931348623157e+308	\x00\x00\x00a	goo
 
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/enum.avro'));
+----
+color	ENUM('UNKNOWN', 'GREEN', 'RED')
+
+query I
+FROM read_avro('test/enum.avro')
+----
+GREEN
+GREEN
+RED
+UNKNOWN
+UNKNOWN
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/fixed.avro'));
+----
+md5	BLOB
+
+query I
+FROM read_avro('test/fixed.avro')
+----
+47336f3f2497b70ac046cf23298e20a7
+a789a15a7ff7db4a0d1b186363ef0771
+c9db7c67a6acb5a65c78b19e9e01d7b0
+ac441296bcbd44442301204a8f061cf2
+
+
 statement error
 from read_avro('does-not-exist.avro')
 ----
