@@ -74,6 +74,14 @@ static LogicalType TransformAvroType(const AvroType &avro_type) {
   }
   case LogicalTypeId::LIST:
     return LogicalType::LIST(TransformAvroType(avro_type.children[0].second));
+  case LogicalTypeId::MAP: {
+    child_list_t<LogicalType> children;
+    children.push_back(
+        std::pair<std::string, LogicalType>("key", LogicalType::VARCHAR));
+    children.push_back(std::pair<std::string, LogicalType>(
+        "value", TransformAvroType(avro_type.children[0].second)));
+    return LogicalType::MAP(LogicalType::STRUCT(std::move(children)));
+  }
   case LogicalTypeId::UNION: {
     for (auto &child : avro_type.children) {
       if (child.second.duckdb_type == LogicalTypeId::SQLNULL) {
@@ -168,13 +176,18 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
         std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
     return AvroType(AVRO_ARRAY, LogicalTypeId::LIST, std::move(list_children));
   }
+  case AVRO_MAP: {
+    auto child_schema = avro_schema_map_values(avro_schema);
+    auto child_type = TransformSchema(child_schema);
+    child_list_t<AvroType> map_children;
+    map_children.push_back(
+        std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
+    return AvroType(AVRO_MAP, LogicalTypeId::MAP, std::move(map_children));
+  }
   default:
     throw NotImplementedException("Unknown Avro Type %s",
                                   avro_schema_type_name(avro_schema));
   }
-
-  // TODO one type to go
-  // AVRO_MAP
   // AVRO_LINK no idea what this is
 }
 
@@ -320,6 +333,40 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
       TransformValue(&child_value, avro_type.children[child_idx].second,
                      *StructVector::GetEntries(target)[child_idx], out_idx);
     }
+    break;
+  }
+
+  case LogicalTypeId::MAP: {
+    size_t entry_count;
+    if (avro_value_get_size(avro_val, &entry_count)) {
+      throw InvalidInputException(avro_strerror());
+    }
+
+    D_ASSERT(avro_type.children.size() == 1);
+    auto child_offset = ListVector::GetListSize(target);
+    ListVector::SetListSize(target, child_offset + entry_count);
+
+    auto &key_vector = MapVector::GetKeys(target);
+    auto &value_vector = MapVector::GetValues(target);
+
+    D_ASSERT(key_vector.GetType().id() == LogicalTypeId::VARCHAR);
+    auto string_ptr = FlatVector::GetData<string_t>(key_vector);
+    for (idx_t entry_idx = 0; entry_idx < entry_count; entry_idx++) {
+      avro_value child_value;
+      const char *map_key;
+      if (avro_value_get_by_index(avro_val, entry_idx, &child_value,
+                                  &map_key)) {
+        throw InvalidInputException(avro_strerror());
+      }
+      string_ptr[child_offset + entry_idx] =
+          StringVector::AddString(key_vector, map_key);
+      TransformValue(&child_value, avro_type.children[0].second, value_vector,
+                     child_offset + entry_idx);
+    }
+    auto list_vector = ListVector::GetData(target);
+
+    list_vector[out_idx].offset = child_offset;
+    list_vector[out_idx].length = entry_count;
     break;
   }
 

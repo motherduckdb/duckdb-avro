@@ -155,6 +155,20 @@ FROM read_avro('test/string_array.avro')
 [data]
 
 
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/long_map.avro'));
+----
+long_map	MAP(VARCHAR, BIGINT)
+
+query I
+FROM read_avro('test/long_map.avro')
+----
+{one=42}
+{two=43}
+{three=44}
+
+
 statement error
 from read_avro('does-not-exist.avro')
 ----

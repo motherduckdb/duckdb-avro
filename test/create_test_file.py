@@ -311,7 +311,42 @@ reader.close()
 
 
 
-# array
+
+
+json_schema = """
+{ "type": "record",
+ "name": "root",
+     "fields": [
+        {
+            "name": "long_map",
+            "type":  {
+               "type": "map",
+               "values" : "long",
+               "default": {}
+             }
+        }
+    ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("long_map.avro", "wb"), DatumWriter(), schema)
+
+writer.append({ 'long_map' : {'one': 42}})
+writer.append({ 'long_map' : {'two': 43}})
+writer.append({ 'long_map' : {'three': 44}})
+
+writer.close()
+
+reader = DataFileReader(open("long_map.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
 
 
 
