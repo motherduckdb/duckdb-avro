@@ -102,93 +102,95 @@ static LogicalType TransformAvroType(const AvroType &avro_type) {
 
 static AvroType TransformSchema(avro_schema_t &avro_schema) {
   switch (avro_typeof(avro_schema)) {
-  case AVRO_NULL:
-    return AvroType(AVRO_NULL, LogicalType::SQLNULL);
-  case AVRO_BOOLEAN:
-    return AvroType(AVRO_BOOLEAN, LogicalType::BOOLEAN);
-  case AVRO_INT32:
-    return AvroType(AVRO_INT32, LogicalType::INTEGER);
-  case AVRO_INT64:
-    return AvroType(AVRO_INT64, LogicalType::BIGINT);
-  case AVRO_FLOAT:
-    return AvroType(AVRO_FLOAT, LogicalType::FLOAT);
-  case AVRO_DOUBLE:
-    return AvroType(AVRO_DOUBLE, LogicalType::DOUBLE);
-  case AVRO_BYTES:
-    return AvroType(AVRO_BYTES, LogicalType::BLOB);
-  case AVRO_STRING:
-    return AvroType(AVRO_STRING, LogicalType::VARCHAR);
-  case AVRO_UNION: {
-    auto num_children = avro_schema_union_size(avro_schema);
-    child_list_t<AvroType> union_children;
-    idx_t non_null_child_idx = 0;
-    unordered_map<idx_t, optional_idx> union_child_map;
-    for (idx_t child_idx = 0; child_idx < num_children; child_idx++) {
-      auto child_schema = avro_schema_union_branch(avro_schema, child_idx);
-      auto child_type = TransformSchema(child_schema);
-      union_children.push_back(std::pair<std::string, AvroType>(
-          StringUtil::Format("u%llu", child_idx), std::move(child_type)));
-      if (child_type.duckdb_type != LogicalTypeId::SQLNULL) {
-        union_child_map[child_idx] = non_null_child_idx++;
+    case AVRO_NULL:
+      return AvroType(AVRO_NULL, LogicalType::SQLNULL);
+    case AVRO_BOOLEAN:
+      return AvroType(AVRO_BOOLEAN, LogicalType::BOOLEAN);
+    case AVRO_INT32:
+      return AvroType(AVRO_INT32, LogicalType::INTEGER);
+    case AVRO_INT64:
+      return AvroType(AVRO_INT64, LogicalType::BIGINT);
+    case AVRO_FLOAT:
+      return AvroType(AVRO_FLOAT, LogicalType::FLOAT);
+    case AVRO_DOUBLE:
+      return AvroType(AVRO_DOUBLE, LogicalType::DOUBLE);
+    case AVRO_BYTES:
+      return AvroType(AVRO_BYTES, LogicalType::BLOB);
+    case AVRO_STRING:
+      return AvroType(AVRO_STRING, LogicalType::VARCHAR);
+    case AVRO_UNION: {
+      auto num_children = avro_schema_union_size(avro_schema);
+      child_list_t<AvroType> union_children;
+      idx_t non_null_child_idx = 0;
+      unordered_map<idx_t, optional_idx> union_child_map;
+      for (idx_t child_idx = 0; child_idx < num_children; child_idx++) {
+        auto child_schema = avro_schema_union_branch(avro_schema, child_idx);
+        auto child_type = TransformSchema(child_schema);
+        union_children.push_back(std::pair<std::string, AvroType>(
+            StringUtil::Format("u%llu", child_idx), std::move(child_type)));
+        if (child_type.duckdb_type != LogicalTypeId::SQLNULL) {
+          union_child_map[child_idx] = non_null_child_idx++;
+        }
       }
+      return AvroType(AVRO_UNION, LogicalTypeId::UNION, std::move(union_children),
+                      union_child_map);
     }
-    return AvroType(AVRO_UNION, LogicalTypeId::UNION, std::move(union_children),
-                    union_child_map);
-  }
-  case AVRO_RECORD: {
-    auto num_children = avro_schema_record_size(avro_schema);
-    child_list_t<AvroType> struct_children;
-    for (idx_t child_idx = 0; child_idx < num_children; child_idx++) {
-      auto child_schema =
-          avro_schema_record_field_get_by_index(avro_schema, child_idx);
-      auto child_type = TransformSchema(child_schema);
-      auto child_name = avro_schema_record_field_name(avro_schema, child_idx);
-      if (!child_name || strlen(child_name) == 0) {
-        throw InvalidInputException("Empty avro field name");
+    case AVRO_RECORD: {
+      auto num_children = avro_schema_record_size(avro_schema);
+      child_list_t<AvroType> struct_children;
+      for (idx_t child_idx = 0; child_idx < num_children; child_idx++) {
+        auto child_schema =
+            avro_schema_record_field_get_by_index(avro_schema, child_idx);
+        auto child_type = TransformSchema(child_schema);
+        auto child_name = avro_schema_record_field_name(avro_schema, child_idx);
+        if (!child_name || strlen(child_name) == 0) {
+          throw InvalidInputException("Empty avro field name");
+        }
+
+        struct_children.push_back(
+            std::pair<std::string, AvroType>(child_name, std::move(child_type)));
       }
 
-      struct_children.push_back(
-          std::pair<std::string, AvroType>(child_name, std::move(child_type)));
+      return AvroType(AVRO_RECORD, LogicalTypeId::STRUCT,
+                      std::move(struct_children));
     }
+    case AVRO_ENUM: {
+      auto size = avro_schema_enum_number_of_symbols(avro_schema);
+      Vector levels(LogicalType::VARCHAR, size);
+      auto levels_data = FlatVector::GetData<string_t>(levels);
+      for (idx_t enum_idx = 0; enum_idx < size; enum_idx++) {
+        levels_data[enum_idx] = StringVector::AddString(
+            levels, avro_schema_enum_get(avro_schema, enum_idx));
+      }
+      levels.Verify(size);
+      return AvroType(AVRO_ENUM, LogicalType::ENUM(levels, size));
+    }
+    case AVRO_FIXED: {
+      return AvroType(AVRO_FIXED, LogicalType::BLOB);
+    }
+    case AVRO_ARRAY: {
+      auto child_schema = avro_schema_array_items(avro_schema);
+      auto child_type = TransformSchema(child_schema);
+      child_list_t<AvroType> list_children;
+      list_children.push_back(
+          std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
+      return AvroType(AVRO_ARRAY, LogicalTypeId::LIST, std::move(list_children));
+    }
+    case AVRO_MAP: {
+      auto child_schema = avro_schema_map_values(avro_schema);
+      auto child_type = TransformSchema(child_schema);
+      child_list_t<AvroType> map_children;
+      map_children.push_back(
+          std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
+      return AvroType(AVRO_MAP, LogicalTypeId::MAP, std::move(map_children));
+    }
+    case AVRO_LINK:
+      throw InvalidInputException("Recursive Avro types are not supported");
 
-    return AvroType(AVRO_RECORD, LogicalTypeId::STRUCT,
-                    std::move(struct_children));
-  }
-  case AVRO_ENUM: {
-    auto size = avro_schema_enum_number_of_symbols(avro_schema);
-    Vector levels(LogicalType::VARCHAR, size);
-    auto levels_data = FlatVector::GetData<string_t>(levels);
-    for (idx_t enum_idx = 0; enum_idx < size; enum_idx++) {
-      levels_data[enum_idx] = StringVector::AddString(
-          levels, avro_schema_enum_get(avro_schema, enum_idx));
-    }
-    levels.Verify(size);
-    return AvroType(AVRO_ENUM, LogicalType::ENUM(levels, size));
-  }
-  case AVRO_FIXED: {
-    return AvroType(AVRO_FIXED, LogicalType::BLOB);
-  }
-  case AVRO_ARRAY: {
-    auto child_schema = avro_schema_array_items(avro_schema);
-    auto child_type = TransformSchema(child_schema);
-    child_list_t<AvroType> list_children;
-    list_children.push_back(
-        std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
-    return AvroType(AVRO_ARRAY, LogicalTypeId::LIST, std::move(list_children));
-  }
-  case AVRO_MAP: {
-    auto child_schema = avro_schema_map_values(avro_schema);
-    auto child_type = TransformSchema(child_schema);
-    child_list_t<AvroType> map_children;
-    map_children.push_back(
-        std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
-    return AvroType(AVRO_MAP, LogicalTypeId::MAP, std::move(map_children));
-  }
   default:
     throw NotImplementedException("Unknown Avro Type %s",
                                   avro_schema_type_name(avro_schema));
   }
-  // AVRO_LINK no idea what this is
 }
 
 static unique_ptr<FunctionData>
@@ -297,7 +299,7 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
       break;
     }
     default:
-      throw NotImplementedException("Unknown Avro Type %s");
+      throw NotImplementedException("Unknown Avro blob type %s");
     }
     break;
 

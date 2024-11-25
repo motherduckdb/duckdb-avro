@@ -249,3 +249,9 @@ statement error
 from read_avro('CMakeLists.txt')
 ----
 Incorrect Avro container file magic number
+
+
+statement error
+FROM read_avro('test/recursive.avro')
+----
+Recursive Avro types are not supported

@@ -3,19 +3,6 @@ from avro.datafile import DataFileReader, DataFileWriter
 from avro.io import DatumReader, DatumWriter
 
 
-# record
-# detect recursive types or what happens here?
-
-# {
-#   "type": "record",
-#   "name": "LongList",
-#   "fields" : [
-#     {"name": "value", "type": "long"},          
-#     {"name": "next", "type": ["null", "LongList"]}
-#   ]
-# }
-
-
 
 json_schema = """
 {"namespace": "example.avro",
@@ -514,16 +501,41 @@ reader.close()
 
 
 
-# {
-#   "type": "record",
-#   "name": "LongList",
-#   "aliases": ["LinkedLongs"],                      // old name for this
-#   "fields" : [
-#     {"name": "value", "type": "long"},             // each element has a long
-#     {"name": "next", "type": ["null", "LongList"]} // optional next element
-#   ]
-# }
 
+
+
+json_schema = """
+{
+  "type": "record",
+  "name": "LongList",
+  "fields" : [
+    {"name": "value", "type": "long"},          
+    {"name": "next", "type": ["null", "LongList"]}
+  ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("recursive.avro", "wb"), DatumWriter(), schema)
+
+
+writer.append({ 'value': 42})
+writer.append({ 'value': 43, 'next' : {'value': 44}})
+writer.append({ 'value': 43, 'next' : {'value': 44, 'next' : {'value': 45}}})
+
+writer.close()
+
+reader = DataFileReader(open("recursive.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
+# record
+# detect recursive types or what happens here?
 
 
 
