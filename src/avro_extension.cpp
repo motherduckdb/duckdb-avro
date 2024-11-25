@@ -358,6 +358,7 @@ static void TransformValue(avro_value *avro_val, AvroType &avro_type,
                                   &map_key)) {
         throw InvalidInputException(avro_strerror());
       }
+      D_ASSERT(map_key);
       string_ptr[child_offset + entry_idx] =
           StringVector::AddString(key_vector, map_key);
       TransformValue(&child_value, avro_type.children[0].second, value_vector,
