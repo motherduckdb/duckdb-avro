@@ -155,6 +155,77 @@ FROM read_avro('test/string_array.avro')
 [data]
 
 
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/nullable_string_array.avro'));
+----
+string_arr	VARCHAR[]
+
+query I
+FROM read_avro('test/nullable_string_array.avro')
+----
+[Hello, World]
+[this]
+[]
+NULL
+NULL
+[is, cool, array]
+[data]
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/nullable_entry_string_array.avro'));
+----
+string_arr	VARCHAR[]
+
+query I
+FROM read_avro('test/nullable_entry_string_array.avro')
+----
+[Hello, NULL, World]
+[this]
+[NULL]
+[NULL, NULL, NULL]
+[]
+[NULL, is, cool, NULL, array, NULL]
+[data, NULL]
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/all_nullable_list.avro'));
+----
+string_arr	VARCHAR[]
+
+query I
+FROM read_avro('test/all_nullable_list.avro')
+----
+[Hello, NULL, World]
+[this]
+[NULL]
+[NULL, NULL, NULL]
+[]
+NULL
+NULL
+[NULL, is, cool, NULL, array, NULL]
+[data, NULL]
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/nested_nullable_lists.avro'));
+----
+nested_ints	INTEGER[][]
+
+query I
+FROM read_avro('test/nested_nullable_lists.avro')
+----
+NULL
+[NULL]
+[[NULL], [NULL]]
+[NULL, NULL]
+[[42]]
+[[42], [43]]
+[[42, 43]]
+[[42, 43], NULL, [44, 45]]
+[[42, NULL, 43, NULL], NULL, [44, NULL, 45, NULL], NULL, [46]]
+
 
 query II
 select column_name, column_type from (DESCRIBE FROM read_avro('test/long_map.avro'));

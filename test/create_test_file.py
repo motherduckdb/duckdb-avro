@@ -17,14 +17,6 @@ from avro.io import DatumReader, DatumWriter
 
 
 
-# map
-
-# {
-#   "type": "map",
-#   "values" : "long",
-#   "default": {}
-# }
-
 json_schema = """
 {"namespace": "example.avro",
  "type": "record",
@@ -312,7 +304,6 @@ reader.close()
 
 
 
-
 json_schema = """
 { "type": "record",
  "name": "root",
@@ -346,8 +337,192 @@ reader.close()
 
 
 
+json_schema = """
+{ "type": "record",
+ "name": "root",
+     "fields": [
+        {
+            "name": "string_arr",
+            "type": ["null", {
+              "type": "array",
+              "items" : "string",
+              "default": []
+            }]
+        }
+    ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("nullable_string_array.avro", "wb"), DatumWriter(), schema)
 
 
+
+writer.append({ 'string_arr' : ['Hello' ,'World']})
+writer.append({ 'string_arr' : ['this']})
+writer.append({ 'string_arr' : []})
+writer.append({ 'string_arr' : None})
+writer.append({ 'string_arr' : None})
+writer.append({ 'string_arr' : ['is', 'cool','array']})
+writer.append({ 'string_arr' : ['data']})
+
+
+
+writer.close()
+
+reader = DataFileReader(open("nullable_string_array.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
+
+json_schema = """
+{ "type": "record",
+ "name": "root",
+     "fields": [
+        {
+            "name": "string_arr",
+            "type": {
+              "type": "array",
+              "items" : ["string", "null"],
+              "default": []
+            }
+        }
+    ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("nullable_entry_string_array.avro", "wb"), DatumWriter(), schema)
+
+
+
+writer.append({ 'string_arr' : ['Hello' ,None, 'World']})
+writer.append({ 'string_arr' : ['this']})
+writer.append({ 'string_arr' : [None]})
+writer.append({ 'string_arr' : [None, None, None]})
+writer.append({ 'string_arr' : []})
+writer.append({ 'string_arr' : [None, 'is', 'cool',None, 'array',None]})
+writer.append({ 'string_arr' : ['data',None]})
+
+
+
+writer.close()
+
+reader = DataFileReader(open("nullable_entry_string_array.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
+
+json_schema = """
+{ "type": "record",
+ "name": "root",
+     "fields": [
+        {
+            "name": "string_arr",
+            "type": ["null", {
+              "type": "array",
+              "items" : ["string", "null"],
+              "default": []
+            }]
+        }
+    ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("all_nullable_list.avro", "wb"), DatumWriter(), schema)
+
+
+
+writer.append({ 'string_arr' : ['Hello' ,None, 'World']})
+writer.append({ 'string_arr' : ['this']})
+writer.append({ 'string_arr' : [None]})
+writer.append({ 'string_arr' : [None, None, None]})
+writer.append({ 'string_arr' : []})
+writer.append({ 'string_arr' : None})
+writer.append({ 'string_arr' : None})
+writer.append({ 'string_arr' : [None, 'is', 'cool',None, 'array',None]})
+writer.append({ 'string_arr' : ['data',None]})
+
+
+
+writer.close()
+
+reader = DataFileReader(open("all_nullable_list.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
+json_schema = """
+{ "type": "record",
+ "name": "root",
+     "fields": [
+        {
+            "name": "nested_ints",
+            "type": ["null", {
+              "type": "array",
+              "items" : ["null", {
+                  "type": "array",
+                  "items" : ["int", "null"],
+                  "default": []
+                }],
+              "default": []
+            }]
+        }
+    ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("nested_nullable_lists.avro", "wb"), DatumWriter(), schema)
+
+
+writer.append({ 'nested_ints' : None})
+writer.append({ 'nested_ints' : [None]})
+writer.append({ 'nested_ints' : [[None], [None]]})
+writer.append({ 'nested_ints' : [None, None]})
+writer.append({ 'nested_ints' : [[42]]})
+writer.append({ 'nested_ints' : [[42], [43]]})
+writer.append({ 'nested_ints' : [[42, 43]]})
+writer.append({ 'nested_ints' : [[42, 43], None, [44, 45]]})
+writer.append({ 'nested_ints' : [[42, None, 43, None], None, [44, None, 45, None], None, [46]]})
+
+writer.close()
+
+reader = DataFileReader(open("nested_nullable_lists.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
+
+
+# {
+#   "type": "record",
+#   "name": "LongList",
+#   "aliases": ["LinkedLongs"],                      // old name for this
+#   "fields" : [
+#     {"name": "value", "type": "long"},             // each element has a long
+#     {"name": "next", "type": ["null", "LongList"]} // optional next element
+#   ]
+# }
 
 
 
