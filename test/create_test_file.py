@@ -534,6 +534,41 @@ reader.close()
 
 
 
+
+
+
+json_schema = """
+{ "type": "record",
+"name": "root",
+     "fields": [
+    {"name": "n", "type": "null"}          
+    ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("broken_record.avro", "wb"), DatumWriter(), schema)
+
+writer.append({})
+writer.append({})
+
+# writer.append({ 'value': 42})
+# writer.append({ 'value': 43, 'next' : {'value': 44}})
+# writer.append({ 'value': 43, 'next' : {'value': 44, 'next' : {'value': 45}}})
+
+writer.close()
+
+reader = DataFileReader(open("broken_record.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
+
+
 # record
 # detect recursive types or what happens here?
 

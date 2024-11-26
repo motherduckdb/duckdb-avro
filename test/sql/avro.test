@@ -255,3 +255,79 @@ statement error
 FROM read_avro('test/recursive.avro')
 ----
 Recursive Avro type LongList not supported
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/broken_record.avro'));
+----
+n	INTEGER
+
+query I
+FROM read_avro('test/broken_record.avro')
+----
+NULL
+NULL
+
+
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/query_small.avro'));
+----
+avro_schema	UNION(u0 STRUCT("data" BLOB), u1 STRUCT(fatal BOOLEAN, "name" VARCHAR, description VARCHAR, "position" BIGINT), u2 STRUCT(bytesScanned BIGINT, totalBytes BIGINT), u3 STRUCT(totalBytes BIGINT))
+
+query I
+FROM read_avro('test/query_small.avro')
+----
+NULL
+NULL
+NULL
+
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/avro.avro'));
+----
+visitor	STRUCT(cookie_id VARCHAR, segments STRUCT(id INTEGER, expiration BIGINT)[], edges MAP(VARCHAR, BIGINT), behaviors MAP(VARCHAR, MAP(VARCHAR, INTEGER)), birthdate BIGINT, association_ids MAP(VARCHAR, VARCHAR))
+events	STRUCT(cookie_id VARCHAR, tstamp BIGINT, edge VARCHAR, changes UNION(u0 STRUCT(daystamp VARCHAR, context VARCHAR, "type" ENUM('ADX', 'RETARGET'), count INTEGER), u1 STRUCT(operation ENUM('ADD', 'REPLACE', 'UPDATE', 'REMOVE'), association_id VARCHAR, network VARCHAR, segments INTEGER[])))[]
+
+
+query II
+FROM read_avro('test/avro.avro')
+----
+{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 133263e9e100000, 'tstamp': 1403721385042, 'edge': batchimport, 'changes': NULL}, {'cookie_id': 133263e9e100000, 'tstamp': 1403721385042, 'edge': batchimport, 'changes': NULL}]
+{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 134adb391b00000, 'tstamp': 1403721376988, 'edge': batchimport, 'changes': NULL}]
+{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 1317beb84b00000, 'tstamp': 1403721380452, 'edge': batchimport, 'changes': NULL}]
+{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 12b811f59080000, 'tstamp': 1403721375367, 'edge': batchimport, 'changes': NULL}]
+{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 134338dcf180000, 'tstamp': 1403721380483, 'edge': batchimport, 'changes': NULL}]
+{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 12aa3637e280000, 'tstamp': 1403721383922, 'edge': batchimport, 'changes': NULL}]
+{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 133bc9432a80000, 'tstamp': 1403721385810, 'edge': batchimport, 'changes': NULL}]
+{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 134dbec12c80000, 'tstamp': 1403721376778, 'edge': batchimport, 'changes': NULL}]
+{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 12bd0b8c6201000, 'tstamp': 1403721384549, 'edge': batchimport, 'changes': NULL}]
+{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 13114ef2b401000, 'tstamp': 1403721375994, 'edge': batchimport, 'changes': NULL}]
+
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/part-r-00000.avro'));
+----
+string	VARCHAR
+simple_map	MAP(VARCHAR, INTEGER)
+complex_map	MAP(VARCHAR, MAP(VARCHAR, VARCHAR))
+union_string_null	VARCHAR
+union_int_long_null	UNION(u0 INTEGER, u1 BIGINT)
+union_float_double	UNION(u0 FLOAT, u1 DOUBLE)
+fixed3	BLOB
+fixed2	BLOB
+enum	ENUM('SPADES', 'HEARTS', 'DIAMONDS', 'CLUBS')
+record	STRUCT(value_field VARCHAR)
+array_of_boolean	BOOLEAN[]
+bytes	BLOB
+
+statement ok
+FROM read_avro('test/part-r-00000.avro')
+
+statement error
+select column_name, column_type from (DESCRIBE FROM read_avro('test/4551fe85-feb8-43ec-8408-730e593c8b12-m0.avro'));
+----
+Empty record type

@@ -1,0 +1,38 @@
+# name: test/sql/avro.test
+# description: test avro extension
+# group: [avro]
+
+require avro
+
+statement ok
+from read_avro('/Users/hannes/nobackup/avro/files/query_small.avro')
+
+statement ok
+from read_avro('/Users/hannes/nobackup/avro/files/query_large.avro')
+
+statement ok
+from read_avro('/Users/hannes/nobackup/avro/files/avro.avro')
+
+statement ok
+from read_avro('/Users/hannes/nobackup/avro/files/deflate.avro')
+
+statement ok
+from read_avro('/Users/hannes/nobackup/avro/files/null.avro')
+
+statement ok
+from read_avro('/Users/hannes/nobackup/avro/files/record.avro')
+
+statement ok
+from read_avro('/Users/hannes/nobackup/avro/files/pickfields_nested_with_union.avro')
+
+statement ok
+from read_avro('/Users/hannes/nobackup/avro/files/snappy.avro')
+
+statement ok
+from read_avro('/Users/hannes/nobackup/avro/files/test.avro')
+
+statement ok
+from read_avro('/Users/hannes/nobackup/avro/files/part-r-00000.avro')
+
+statement ok
+from read_avro('/Users/hannes/nobackup/avro/files/4551fe85-feb8-43ec-8408-730e593c8b12-m0.avro')
