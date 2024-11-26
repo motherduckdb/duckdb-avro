@@ -254,4 +254,4 @@ Incorrect Avro container file magic number
 statement error
 FROM read_avro('test/recursive.avro')
 ----
-Recursive Avro types are not supported
+Recursive Avro type LongList not supported
