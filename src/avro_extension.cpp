@@ -244,8 +244,6 @@ AvroBindFunction(ClientContext &context, TableFunctionBindInput &input,
 
   avro_schema_decref(avro_schema);
   avro_file_reader_close(reader);
-  avro_reader_free(avro_reader);
-
   return bind_data;
 }
 
@@ -488,7 +486,6 @@ struct AvroGlobalState : GlobalTableFunctionState {
   ~AvroGlobalState() {
     avro_value_decref(&value);
     avro_file_reader_close(reader);
-    avro_reader_free(memory_reader);
   }
   AvroGlobalState(const AvroBindData &bind_data) {
     memory_reader =
