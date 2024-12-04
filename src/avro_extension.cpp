@@ -1,12 +1,17 @@
 #define DUCKDB_EXTENSION_MAIN
 
 #include "avro_extension.hpp"
+
+#include <unistd.h>
+
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/common/multi_file_reader.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/extension_util.hpp"
-#include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+
 #include <sys/socket.h>
 
 #include "utf8proc_wrapper.hpp"
@@ -35,23 +40,33 @@ struct AvroType {
   }
 };
 
-struct AvroBindData : FunctionData {
-  AllocatedData allocated_data;
-  AvroType avro_type;
-  LogicalType duckdb_type;
+// empty for now
+struct AvroOptions {
 
-  bool Equals(const FunctionData &other_p) const override {
-    const AvroBindData &other = static_cast<const AvroBindData &>(other_p);
-    return avro_type == other.avro_type && duckdb_type == other.duckdb_type;
+  explicit AvroOptions() {}
+
+  void Serialize(Serializer &serializer) const {
+    D_ASSERT(false); // TODO
+  }
+  static AvroOptions Deserialize(Deserializer &deserializer) {
+    D_ASSERT(false); // TODO
+    return AvroOptions();
   }
 
-  unique_ptr<FunctionData> Copy() const override {
-    auto bind_data = make_uniq<AvroBindData>();
-    bind_data->avro_type = avro_type;
-    bind_data->duckdb_type = duckdb_type;
+  MultiFileReaderOptions file_options;
+};
 
-    return bind_data;
-  }
+struct AvroReader;
+
+struct AvroUnionData {
+
+  string file_name;
+  vector<string> names;
+  vector<LogicalType> types;
+  AvroOptions options;
+  unique_ptr<AvroReader> reader;
+
+  const string &GetFileName() { return file_name; }
 };
 
 // we use special transformation rules for unions with null:
@@ -196,55 +211,6 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
     throw NotImplementedException("Unknown Avro Type %s",
                                   avro_schema_type_name(avro_schema));
   }
-}
-
-static unique_ptr<FunctionData>
-AvroBindFunction(ClientContext &context, TableFunctionBindInput &input,
-                 vector<LogicalType> &return_types, vector<string> &names) {
-  auto bind_data = make_uniq<AvroBindData>();
-  auto filename = input.inputs[0].ToString();
-  avro_file_reader_t reader;
-  auto &fs = FileSystem::GetFileSystem(context);
-  if (!fs.FileExists(filename)) {
-    throw InvalidInputException("Avro file %s not found", filename);
-  }
-
-  auto file = fs.OpenFile(filename, FileOpenFlags::FILE_FLAGS_READ);
-  bind_data->allocated_data =
-      Allocator::Get(context).Allocate(file->GetFileSize());
-  auto n_read = file->Read(bind_data->allocated_data.get(),
-                           bind_data->allocated_data.GetSize());
-  D_ASSERT(n_read == file->GetFileSize());
-  auto avro_reader =
-      avro_reader_memory(const_char_ptr_cast(bind_data->allocated_data.get()),
-                         bind_data->allocated_data.GetSize());
-
-  if (avro_reader_reader(avro_reader, &reader)) {
-    throw InvalidInputException(avro_strerror());
-  }
-
-  auto avro_schema = avro_file_reader_get_writer_schema(reader);
-  bind_data->avro_type = TransformSchema(avro_schema);
-
-  bind_data->duckdb_type = TransformAvroType(bind_data->avro_type);
-  auto &duckdb_type = bind_data->duckdb_type;
-
-  // special handling for root structs, we pull up the entries
-  if (duckdb_type.id() == LogicalTypeId::STRUCT) {
-    for (idx_t child_idx = 0;
-         child_idx < StructType::GetChildCount(duckdb_type); child_idx++) {
-      names.push_back(StructType::GetChildName(duckdb_type, child_idx));
-      return_types.push_back(StructType::GetChildType(duckdb_type, child_idx));
-    }
-  } else {
-    auto schema_name = avro_schema_name(avro_schema);
-    names.push_back(schema_name ? schema_name : "avro_schema");
-    return_types.push_back(duckdb_type);
-  }
-
-  avro_schema_decref(avro_schema);
-  avro_file_reader_close(reader);
-  return bind_data;
 }
 
 static void TransformValue(avro_value *avro_val, const AvroType &avro_type,
@@ -482,73 +448,263 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type,
   }
 }
 
-struct AvroGlobalState : GlobalTableFunctionState {
-  ~AvroGlobalState() {
+struct AvroReader {
+  using UNION_READER_DATA = unique_ptr<AvroUnionData>;
+
+  ~AvroReader() {
     avro_value_decref(&value);
     avro_file_reader_close(reader);
   }
-  AvroGlobalState(const AvroBindData &bind_data) {
-    memory_reader =
-        avro_reader_memory(const_char_ptr_cast(bind_data.allocated_data.get()),
-                           bind_data.allocated_data.GetSize());
-    if (avro_reader_reader(memory_reader, &reader)) {
+
+  void Read(DataChunk &output, const vector<column_t> &column_ids) {
+    idx_t out_idx = 0;
+
+    while (avro_file_reader_read_value(reader, &value) == 0) {
+      TransformValue(&value, avro_type, *read_vec, out_idx++);
+      if (out_idx == STANDARD_VECTOR_SIZE) {
+        break;
+      }
+    }
+    // pull up root struct into output chunk
+    if (duckdb_type.id() == LogicalTypeId::STRUCT) {
+      for (idx_t col_idx = 0; col_idx < column_ids.size(); col_idx++) {
+        if (column_ids[col_idx] >= names.size()) {
+          continue; // to be filled in later
+        }
+        output.data[col_idx].Reference(
+            *StructVector::GetEntries(*read_vec)[column_ids[col_idx]]);
+      }
+    } else {
+      output.data[column_ids[0]].Reference(*read_vec);
+    }
+
+    output.SetCardinality(out_idx);
+  }
+
+  const string &GetFileName() { return filename; }
+
+  const vector<string> &GetNames() { return names; }
+
+  const vector<LogicalType> &GetTypes() { return return_types; }
+
+  AvroReader(ClientContext &context, const string filename_p,
+             AvroOptions &options_p) {
+    filename = filename_p;
+    options = options_p;
+    auto &fs = FileSystem::GetFileSystem(context);
+    if (!fs.FileExists(filename)) {
+      throw InvalidInputException("Avro file %s not found", filename);
+    }
+
+    auto file = fs.OpenFile(filename, FileOpenFlags::FILE_FLAGS_READ);
+    allocated_data = Allocator::Get(context).Allocate(file->GetFileSize());
+    auto n_read = file->Read(allocated_data.get(), allocated_data.GetSize());
+    D_ASSERT(n_read == file->GetFileSize());
+    auto avro_reader = avro_reader_memory(
+        const_char_ptr_cast(allocated_data.get()), allocated_data.GetSize());
+
+    if (avro_reader_reader(avro_reader, &reader)) {
       throw InvalidInputException(avro_strerror());
     }
-    auto schema = avro_file_reader_get_writer_schema(reader);
-    auto interface = avro_generic_class_from_schema(schema);
-    avro_schema_decref(schema);
+
+    auto avro_schema = avro_file_reader_get_writer_schema(reader);
+    avro_type = TransformSchema(avro_schema);
+    duckdb_type = TransformAvroType(avro_type);
+    read_vec = make_uniq<Vector>(duckdb_type);
+
+    auto interface = avro_generic_class_from_schema(avro_schema);
     avro_generic_value_new(interface, &value);
     avro_value_iface_decref(interface);
-    read_vec = make_uniq<Vector>(bind_data.duckdb_type);
+
+    // special handling for root structs, we pull up the entries
+    if (duckdb_type.id() == LogicalTypeId::STRUCT) {
+      for (idx_t child_idx = 0;
+           child_idx < StructType::GetChildCount(duckdb_type); child_idx++) {
+        names.push_back(StructType::GetChildName(duckdb_type, child_idx));
+        return_types.push_back(
+            StructType::GetChildType(duckdb_type, child_idx));
+      }
+    } else {
+      auto schema_name = avro_schema_name(avro_schema);
+      names.push_back(schema_name ? schema_name : "avro_schema");
+      return_types.push_back(duckdb_type);
+    }
+    avro_schema_decref(avro_schema);
   }
+
+  static unique_ptr<AvroUnionData>
+  StoreUnionReader(unique_ptr<AvroReader> scan_p, idx_t file_idx) {
+    auto data = make_uniq<AvroUnionData>();
+    // if (file_idx == 0) {
+    //   data->file_name = scan_p->file_path;
+    //   data->options = scan_p->options;
+    //   data->names = scan_p->names;
+    //   data->types = scan_p->types;
+    //   data->reader = std::move(scan_p);
+    // } else {
+    //   data->file_name = scan_p->file_path;
+    //   data->options = std::move(scan_p->options);
+    //   data->names = std::move(scan_p->names);
+    //   data->types = std::move(scan_p->types);
+    // }
+    // data->options.auto_detect = false;
+    D_ASSERT(false);
+    return data;
+  }
+
   avro_file_reader_t reader;
-  avro_reader_t memory_reader;
-  avro_schema_t schema;
   avro_value_t value;
   unique_ptr<Vector> read_vec;
+
+  AllocatedData allocated_data;
+  AvroType avro_type;
+  LogicalType duckdb_type;
+  vector<LogicalType> return_types;
+  vector<string> names;
+  AvroOptions options;
+  MultiFileReaderData reader_data;
+  string filename;
+};
+
+struct AvroBindData : FunctionData {
+  shared_ptr<MultiFileList> file_list;
+  unique_ptr<MultiFileReader> multi_file_reader;
+  MultiFileReaderBindData reader_bind;
+  vector<string> names;
+  vector<LogicalType> types;
+  AvroOptions avro_options;
+  vector<unique_ptr<AvroUnionData>> union_readers;
+  shared_ptr<AvroReader> initial_reader;
+
+  void Initialize(shared_ptr<AvroReader> reader) {
+    initial_reader = std::move(reader);
+    avro_options = initial_reader->options;
+  }
+
+  void Initialize(ClientContext &, shared_ptr<AvroReader> reader) {
+    Initialize(reader);
+  }
+
+  void Initialize(ClientContext &, unique_ptr<AvroUnionData> &union_data) {
+    Initialize(std::move(union_data->reader));
+    D_ASSERT(false); // FIXME
+  }
+
+  bool Equals(const FunctionData &other_p) const override {
+    //   const AvroBindData &other = static_cast<const AvroBindData &>(other_p);
+    //   return avro_type == other.avro_type && duckdb_type ==
+    //   other.duckdb_type;
+    D_ASSERT(false); // FIXME
+    return false;
+  }
+
+  unique_ptr<FunctionData> Copy() const override {
+    //   auto bind_data = make_uniq<AvroBindData>();
+    //   bind_data->avro_type = avro_type;
+    //   bind_data->duckdb_type = duckdb_type;
+    D_ASSERT(false); // FIXME
+    return nullptr;
+    //
+    //   return bind_data;
+  }
+};
+
+static unique_ptr<FunctionData>
+AvroBindFunction(ClientContext &context, TableFunctionBindInput &input,
+                 vector<LogicalType> &return_types, vector<string> &names) {
+
+  auto &filename = input.inputs[0];
+  auto result = make_uniq<AvroBindData>();
+  result->multi_file_reader = MultiFileReader::Create(input.table_function);
+
+  for (auto &kv : input.named_parameters) {
+    if (kv.second.IsNull()) {
+      throw BinderException("Cannot use NULL as function argument");
+    }
+    auto loption = StringUtil::Lower(kv.first);
+    if (result->multi_file_reader->ParseOption(
+            kv.first, kv.second, result->avro_options.file_options, context)) {
+      continue;
+    }
+    throw InternalException("Unrecognized option %s", loption.c_str());
+  }
+
+  result->file_list =
+      result->multi_file_reader->CreateFileList(context, filename);
+
+  result->reader_bind = result->multi_file_reader->BindReader<AvroReader>(
+      context, result->types, result->names, *result->file_list, *result,
+      result->avro_options);
+
+  return_types = result->types;
+  names = result->names;
+
+  return result;
+}
+
+struct AvroGlobalState : GlobalTableFunctionState {
+  //
+  // //! The file list to scan
+  // shared_ptr<MultiFileList> file_list;
+  // //! The scan over the file_list
+  // MultiFileListScanData file_list_scan;
+
+  unique_ptr<MultiFileReaderGlobalState> multi_file_reader_state;
+
+  mutex lock;
+
+  //! Index of file currently up for scanning
+  atomic<idx_t> file_index;
+
+  vector<column_t> column_ids;
 };
 
 static void AvroTableFunction(ClientContext &context, TableFunctionInput &data,
                               DataChunk &output) {
   auto &bind_data = data.bind_data->Cast<AvroBindData>();
-
   auto &global_state = data.global_state->Cast<AvroGlobalState>();
-  idx_t out_idx = 0;
+  auto &reader = bind_data.initial_reader;
 
-  while (avro_file_reader_read_value(global_state.reader,
-                                     &global_state.value) == 0) {
-    TransformValue(&global_state.value, bind_data.avro_type,
-                   *global_state.read_vec, out_idx++);
-    if (out_idx == STANDARD_VECTOR_SIZE) {
-      break;
-    }
-  }
-
-  // pull up root struct into output chunk
-  if (bind_data.duckdb_type.id() == LogicalTypeId::STRUCT) {
-    for (idx_t col_idx = 0; col_idx < output.ColumnCount(); col_idx++) {
-      output.data[col_idx].Reference(
-          *StructVector::GetEntries(*global_state.read_vec)[col_idx]);
-    }
-  } else {
-    output.data[0].Reference(*global_state.read_vec);
-  }
-
-  output.SetCardinality(out_idx);
+  reader->Read(output, global_state.column_ids);
+  bind_data.multi_file_reader->FinalizeChunk(
+      context, bind_data.reader_bind, reader->reader_data, output,
+      global_state.multi_file_reader_state);
 }
 
-static unique_ptr<GlobalTableFunctionState>
+unique_ptr<GlobalTableFunctionState>
 AvroGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
+  auto result = make_uniq<AvroGlobalState>();
   auto &bind_data = input.bind_data->Cast<AvroBindData>();
-  return make_uniq<AvroGlobalState>(bind_data);
+
+  result->multi_file_reader_state =
+      bind_data.multi_file_reader->InitializeGlobalState(
+          context, bind_data.avro_options.file_options, bind_data.reader_bind,
+          *bind_data.file_list, bind_data.types, bind_data.names,
+          input.column_ids);
+
+  // this is not used as far as i can tell but whatevs
+  D_ASSERT(!result->multi_file_reader_state);
+
+  bind_data.multi_file_reader->InitializeReader(
+      *bind_data.initial_reader, bind_data.avro_options.file_options,
+      bind_data.reader_bind, bind_data.types, bind_data.names, input.column_ids,
+      input.filters, bind_data.file_list->GetFirstFile(), context,
+      result->multi_file_reader_state);
+
+  result->file_index = 0;
+  result->column_ids = input.column_ids;
+  return result;
 }
 
 static void LoadInternal(DatabaseInstance &instance) {
   // Register a scalar function
-  auto avro_read_function =
+  auto table_function =
       TableFunction("read_avro", {LogicalType::VARCHAR}, AvroTableFunction,
                     AvroBindFunction, AvroGlobalInit);
-  ExtensionUtil::RegisterFunction(instance, avro_read_function);
+  table_function.projection_pushdown = true;
+  MultiFileReader::AddParameters(table_function);
+  ExtensionUtil::RegisterFunction(
+      instance, MultiFileReader::CreateFunctionSet(table_function));
 }
 
 void AvroExtension::Load(DuckDB &db) { LoadInternal(*db.instance); }

@@ -22,6 +22,47 @@ salary	DOUBLE
 title	VARCHAR
 comments	VARCHAR
 
+
+# usual suspect, the userdata1 file, this time with a filename arg
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/userdata1.avro', filename=true));
+----
+registration_dttm	VARCHAR
+id	BIGINT
+first_name	VARCHAR
+last_name	VARCHAR
+email	VARCHAR
+gender	VARCHAR
+ip_address	VARCHAR
+cc	BIGINT
+country	VARCHAR
+birthdate	VARCHAR
+salary	DOUBLE
+title	VARCHAR
+comments	VARCHAR
+filename	VARCHAR
+
+
+query IIII
+FROM read_avro('test/userdata1.avro', filename=true) SELECT first_name, cc, salary, filename ORDER BY registration_dttm LIMIT 10;
+----
+Lillian	201713786459078	282503.77	test/userdata1.avro
+Chris	5602220700741429	NULL	test/userdata1.avro
+Nicholas	3575506969751259	192076.79	test/userdata1.avro
+Johnny	5602239825516409	169429.76	test/userdata1.avro
+Bruce	NULL	118244.57	test/userdata1.avro
+Heather	NULL	164117.18	test/userdata1.avro
+Larry	3531208154739438	139177.38	test/userdata1.avro
+Roy	3589146577885209	262816.87	test/userdata1.avro
+James	3589416270039051	211553.57	test/userdata1.avro
+Sean	NULL	NULL	test/userdata1.avro
+
+query II
+FROM read_avro('test/userdata*.avro', filename=true) SELECT filename, max(salary) GROUP BY filename ORDER BY filename;
+----
+test/userdata1.avro	286592.99
+
+
 query III
 FROM read_avro('test/userdata1.avro') SELECT first_name, cc, salary ORDER BY registration_dttm LIMIT 10;
 ----
@@ -243,7 +284,7 @@ FROM read_avro('test/long_map.avro')
 statement error
 from read_avro('does-not-exist.avro')
 ----
-not found
+No files found that match the pattern
 
 statement error
 from read_avro('CMakeLists.txt')
@@ -331,3 +372,23 @@ statement error
 select column_name, column_type from (DESCRIBE FROM read_avro('test/4551fe85-feb8-43ec-8408-730e593c8b12-m0.avro'));
 ----
 Empty record type
+
+
+# usual suspect, the userdata1 file, this time with a wildcard
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/userdata1*.avro'));
+----
+registration_dttm	VARCHAR
+id	BIGINT
+first_name	VARCHAR
+last_name	VARCHAR
+email	VARCHAR
+gender	VARCHAR
+ip_address	VARCHAR
+cc	BIGINT
+country	VARCHAR
+birthdate	VARCHAR
+salary	DOUBLE
+title	VARCHAR
+comments	VARCHAR
+
