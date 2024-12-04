@@ -488,7 +488,7 @@ struct AvroReader {
   const vector<LogicalType> &GetTypes() { return return_types; }
 
   AvroReader(ClientContext &context, const string filename_p,
-             AvroOptions &options_p) {
+             const AvroOptions &options_p) {
     filename = filename_p;
     options = options_p;
     auto &fs = FileSystem::GetFileSystem(context);
@@ -649,26 +649,46 @@ struct AvroGlobalState : GlobalTableFunctionState {
   // //! The scan over the file_list
   // MultiFileListScanData file_list_scan;
 
-  unique_ptr<MultiFileReaderGlobalState> multi_file_reader_state;
-
   mutex lock;
 
   //! Index of file currently up for scanning
   atomic<idx_t> file_index;
+
+  MultiFileListScanData scan_data;
+  shared_ptr<AvroReader> reader;
 
   vector<column_t> column_ids;
 };
 
 static void AvroTableFunction(ClientContext &context, TableFunctionInput &data,
                               DataChunk &output) {
+  // if (!data.local_state) {
+  //   return;
+  // }
   auto &bind_data = data.bind_data->Cast<AvroBindData>();
   auto &global_state = data.global_state->Cast<AvroGlobalState>();
-  auto &reader = bind_data.initial_reader;
+  do {
+    output.Reset();
+    bind_data.initial_reader->Read(output, global_state.column_ids);
+    bind_data.multi_file_reader->FinalizeChunk(
+        context, bind_data.reader_bind, bind_data.initial_reader->reader_data,
+        output, nullptr);
 
-  reader->Read(output, global_state.column_ids);
-  bind_data.multi_file_reader->FinalizeChunk(
-      context, bind_data.reader_bind, reader->reader_data, output,
-      global_state.multi_file_reader_state);
+    if (output.size() > 0) {
+      return;
+    }
+    // see if we can open another file
+    {
+      unique_lock<mutex> parallel_lock(global_state.lock);
+      string file;
+      if (!bind_data.file_list->Scan(global_state.scan_data, file)) {
+        return;
+      }
+      global_state.reader =
+          make_shared_ptr<AvroReader>(context, file, bind_data.avro_options);
+      // TODO check schema!?
+    }
+  } while (true);
 }
 
 unique_ptr<GlobalTableFunctionState>
@@ -676,23 +696,17 @@ AvroGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
   auto result = make_uniq<AvroGlobalState>();
   auto &bind_data = input.bind_data->Cast<AvroBindData>();
 
-  result->multi_file_reader_state =
-      bind_data.multi_file_reader->InitializeGlobalState(
-          context, bind_data.avro_options.file_options, bind_data.reader_bind,
-          *bind_data.file_list, bind_data.types, bind_data.names,
-          input.column_ids);
-
-  // this is not used as far as i can tell but whatevs
-  D_ASSERT(!result->multi_file_reader_state);
+  result->reader = bind_data.initial_reader;
 
   bind_data.multi_file_reader->InitializeReader(
-      *bind_data.initial_reader, bind_data.avro_options.file_options,
+      *result->reader, bind_data.avro_options.file_options,
       bind_data.reader_bind, bind_data.types, bind_data.names, input.column_ids,
-      input.filters, bind_data.file_list->GetFirstFile(), context,
-      result->multi_file_reader_state);
+      input.filters, bind_data.file_list->GetFirstFile(), context, nullptr);
 
   result->file_index = 0;
   result->column_ids = input.column_ids;
+  bind_data.file_list->InitializeScan(result->scan_data);
+
   return result;
 }
 
