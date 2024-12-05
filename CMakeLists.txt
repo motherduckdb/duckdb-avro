@@ -11,7 +11,7 @@ find_path(AVRO_INCLUDE_DIR avro.h)
 find_library(AVRO_LIBRARY avro)
 find_library(JANSSON_LIBRARY jansson)
 find_library(LZMA_LIBRARY lzma)
-# find_library(ZLIB_LIBRARY zlib)
+find_library(ZLIB_LIBRARY z)
 find_library(SNAPPY_LIBRARY snappy)
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
@@ -36,7 +36,7 @@ target_link_libraries(
   ${JEMALLOC_LIBRARY}
   ${JANSSON_LIBRARY}
   ${LZMA_LIBRARY}
-  # ${ZLIB_LIBRARY}
+  ${ZLIB_LIBRARY}
   ${SNAPPY_LIBRARY}
   ${GMP_LIBRARY}
   ${MATH_LIBRARY})
@@ -47,7 +47,7 @@ target_link_libraries(
   ${JEMALLOC_LIBRARY}
   ${JANSSON_LIBRARY}
   ${LZMA_LIBRARY}
-  # ${ZLIB_LIBRARY}
+  ${ZLIB_LIBRARY}
   ${SNAPPY_LIBRARY}
   ${GMP_LIBRARY}
   ${MATH_LIBRARY})
