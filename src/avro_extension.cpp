@@ -2,8 +2,6 @@
 
 #include "avro_extension.hpp"
 
-#include <unistd.h>
-
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -12,11 +10,9 @@
 #include "duckdb/main/extension_util.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 
-#include <sys/socket.h>
-
 #include "utf8proc_wrapper.hpp"
 
-#include "avro.h"
+#include <avro.h>
 
 namespace duckdb {
 
@@ -154,7 +150,8 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
   case AVRO_RECORD: {
     auto num_children = avro_schema_record_size(avro_schema);
     if (num_children == 0) {
-      // this we just ignore but we need a marker so we don't get our offsets wrong
+      // this we just ignore but we need a marker so we don't get our offsets
+      // wrong
       return AvroType(AVRO_RECORD, LogicalTypeId::SQLNULL);
     }
     child_list_t<AvroType> struct_children;
