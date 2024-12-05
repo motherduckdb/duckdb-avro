@@ -40,17 +40,17 @@ struct AvroType {
   }
 };
 
-// empty for now
 struct AvroOptions {
 
   explicit AvroOptions() {}
 
   void Serialize(Serializer &serializer) const {
-    D_ASSERT(false); // TODO
+    file_options.Serialize(serializer);
   }
   static AvroOptions Deserialize(Deserializer &deserializer) {
-    D_ASSERT(false); // TODO
-    return AvroOptions();
+    AvroOptions options;
+    options.file_options = MultiFileReaderOptions::Deserialize(deserializer);
+    return options;
   }
 
   MultiFileReaderOptions file_options;
@@ -643,71 +643,75 @@ AvroBindFunction(ClientContext &context, TableFunctionBindInput &input,
 }
 
 struct AvroGlobalState : GlobalTableFunctionState {
-  //
-  // //! The file list to scan
-  // shared_ptr<MultiFileList> file_list;
-  // //! The scan over the file_list
-  // MultiFileListScanData file_list_scan;
-
   mutex lock;
-
-  //! Index of file currently up for scanning
-  atomic<idx_t> file_index;
 
   MultiFileListScanData scan_data;
   shared_ptr<AvroReader> reader;
 
   vector<column_t> column_ids;
+  optional_ptr<TableFilterSet> filters;
 };
+
+static bool AvroNextFile(ClientContext &context, const AvroBindData &bind_data,
+                         AvroGlobalState &global_state,
+                         shared_ptr<AvroReader> initial_reader) {
+  unique_lock<mutex> parallel_lock(global_state.lock);
+
+  string file;
+  if (!bind_data.file_list->Scan(global_state.scan_data, file)) {
+    return false;
+  }
+
+  // re-use initial reader for first file, no need to parse metadata again
+  if (initial_reader) {
+    D_ASSERT(file == initial_reader->filename);
+    global_state.reader = initial_reader;
+  } else {
+    global_state.reader =
+        make_shared_ptr<AvroReader>(context, file, bind_data.avro_options);
+  }
+
+  bind_data.multi_file_reader->InitializeReader(
+      *global_state.reader, bind_data.avro_options.file_options,
+      bind_data.reader_bind, bind_data.types, bind_data.names,
+      global_state.column_ids, global_state.filters, file, context, nullptr);
+  return true;
+}
 
 static void AvroTableFunction(ClientContext &context, TableFunctionInput &data,
                               DataChunk &output) {
-  // if (!data.local_state) {
-  //   return;
-  // }
   auto &bind_data = data.bind_data->Cast<AvroBindData>();
   auto &global_state = data.global_state->Cast<AvroGlobalState>();
   do {
     output.Reset();
-    bind_data.initial_reader->Read(output, global_state.column_ids);
-    bind_data.multi_file_reader->FinalizeChunk(
-        context, bind_data.reader_bind, bind_data.initial_reader->reader_data,
-        output, nullptr);
-
+    global_state.reader->Read(output, global_state.column_ids);
+    bind_data.multi_file_reader->FinalizeChunk(context, bind_data.reader_bind,
+                                               global_state.reader->reader_data,
+                                               output, nullptr);
     if (output.size() > 0) {
       return;
     }
-    // see if we can open another file
-    {
-      unique_lock<mutex> parallel_lock(global_state.lock);
-      string file;
-      if (!bind_data.file_list->Scan(global_state.scan_data, file)) {
-        return;
-      }
-      global_state.reader =
-          make_shared_ptr<AvroReader>(context, file, bind_data.avro_options);
-      // TODO check schema!?
+    if (!AvroNextFile(context, bind_data, global_state, nullptr)) {
+      return;
     }
   } while (true);
 }
 
 unique_ptr<GlobalTableFunctionState>
 AvroGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
-  auto result = make_uniq<AvroGlobalState>();
+  auto global_state_result = make_uniq<AvroGlobalState>();
+  auto &global_state = *global_state_result;
   auto &bind_data = input.bind_data->Cast<AvroBindData>();
 
-  result->reader = bind_data.initial_reader;
+  global_state.column_ids = input.column_ids;
+  global_state.filters = input.filters;
 
-  bind_data.multi_file_reader->InitializeReader(
-      *result->reader, bind_data.avro_options.file_options,
-      bind_data.reader_bind, bind_data.types, bind_data.names, input.column_ids,
-      input.filters, bind_data.file_list->GetFirstFile(), context, nullptr);
-
-  result->file_index = 0;
-  result->column_ids = input.column_ids;
-  bind_data.file_list->InitializeScan(result->scan_data);
-
-  return result;
+  bind_data.file_list->InitializeScan(global_state.scan_data);
+  if (!AvroNextFile(context, bind_data, global_state,
+                    bind_data.initial_reader)) {
+    throw InternalException("Cannot scan files");
+  }
+  return global_state_result;
 }
 
 static void LoadInternal(DatabaseInstance &instance) {
