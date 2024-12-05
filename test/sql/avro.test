@@ -384,11 +384,13 @@ bytes	BLOB
 statement ok
 FROM read_avro('test/part-r-00000.avro')
 
-statement error
+# iceberg yay
+query II
 select column_name, column_type from (DESCRIBE FROM read_avro('test/4551fe85-feb8-43ec-8408-730e593c8b12-m0.avro'));
 ----
-Empty record type
-
+status	INTEGER
+snapshot_id	BIGINT
+data_file	STRUCT(file_path VARCHAR, file_format VARCHAR, "partition" INTEGER, record_count BIGINT, file_size_in_bytes BIGINT, block_size_in_bytes BIGINT, file_ordinal INTEGER, sort_columns INTEGER[], column_sizes STRUCT("key" INTEGER, "value" BIGINT)[], value_counts STRUCT("key" INTEGER, "value" BIGINT)[], null_value_counts STRUCT("key" INTEGER, "value" BIGINT)[], lower_bounds STRUCT("key" INTEGER, "value" BLOB)[], upper_bounds STRUCT("key" INTEGER, "value" BLOB)[], key_metadata BLOB, split_offsets BIGINT[])
 
 # usual suspect, the userdata1 file, this time with a wildcard
 query II

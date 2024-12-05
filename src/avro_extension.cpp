@@ -154,7 +154,8 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
   case AVRO_RECORD: {
     auto num_children = avro_schema_record_size(avro_schema);
     if (num_children == 0) {
-      throw InvalidInputException("Empty record type");
+      // this we just ignore but we need a marker so we don't get our offsets wrong
+      return AvroType(AVRO_RECORD, LogicalTypeId::SQLNULL);
     }
     child_list_t<AvroType> struct_children;
     for (idx_t child_idx = 0; child_idx < num_children; child_idx++) {
