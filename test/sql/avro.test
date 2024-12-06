@@ -85,13 +85,13 @@ Sean	NULL	NULL	test/userdata1.avro
 
 # with filename wildcard
 query III
-FROM read_avro('test/userdata*.avro', filename=true) SELECT filename, count(*), max(salary) GROUP BY filename ORDER BY filename;
+FROM read_avro('test/userdata*.avro', filename=true) SELECT filename[6:], count(*), max(salary) GROUP BY filename ORDER BY filename;
 ----
-test/userdata1.avro	1000	286592.99
-test/userdata2.avro	998	286587.01
-test/userdata3.avro	1000	286735.82
-test/userdata4.avro	1000	286147.64
-test/userdata5.avro	1000	286384.03
+userdata1.avro	1000	286592.99
+userdata2.avro	998	286587.01
+userdata3.avro	1000	286735.82
+userdata4.avro	1000	286147.64
+userdata5.avro	1000	286384.03
 
 
 # with union_by_name wildcard
