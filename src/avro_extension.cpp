@@ -533,20 +533,12 @@ struct AvroReader {
   static unique_ptr<AvroUnionData>
   StoreUnionReader(unique_ptr<AvroReader> scan_p, idx_t file_idx) {
     auto data = make_uniq<AvroUnionData>();
-    // if (file_idx == 0) {
-    //   data->file_name = scan_p->file_path;
-    //   data->options = scan_p->options;
-    //   data->names = scan_p->names;
-    //   data->types = scan_p->types;
-    //   data->reader = std::move(scan_p);
-    // } else {
-    //   data->file_name = scan_p->file_path;
-    //   data->options = std::move(scan_p->options);
-    //   data->names = std::move(scan_p->names);
-    //   data->types = std::move(scan_p->types);
-    // }
-    // data->options.auto_detect = false;
-    D_ASSERT(false);
+    data->file_name = scan_p->GetFileName();
+    data->options = scan_p->options;
+    data->names = scan_p->GetNames();
+    data->types = scan_p->GetTypes();
+    data->reader = std::move(scan_p);
+
     return data;
   }
 
@@ -585,7 +577,10 @@ struct AvroBindData : FunctionData {
 
   void Initialize(ClientContext &, unique_ptr<AvroUnionData> &union_data) {
     Initialize(std::move(union_data->reader));
-    D_ASSERT(false); // FIXME
+    names = union_data->names;
+    types = union_data->types;
+    avro_options = union_data->options;
+    initial_reader = std::move(union_data->reader);
   }
 
   bool Equals(const FunctionData &other_p) const override {

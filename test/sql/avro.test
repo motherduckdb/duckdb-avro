@@ -93,6 +93,15 @@ test/userdata3.avro	1000	286735.82
 test/userdata4.avro	1000	286147.64
 test/userdata5.avro	1000	286384.03
 
+
+# with union_by_name wildcard
+
+query II
+FROM read_avro('test/userdata*.avro', union_by_name=True) SELECT count(*), max(salary) ;
+----
+4998	286735.82
+
+
 query II
 select column_name, column_type from (DESCRIBE FROM read_avro('test/users.avro'));
 ----

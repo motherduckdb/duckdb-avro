@@ -7,6 +7,7 @@ find_path(AVRO_INCLUDE_DIR avro.h REQUIRED)
 find_library(AVRO_LIBRARY avro REQUIRED)
 find_library(JANSSON_LIBRARY jansson REQUIRED)
 find_library(LZMA_LIBRARY lzma REQUIRED)
+
 if(MSVC) # endless screaming
   find_library(ZLIB_LIBRARY zlib REQUIRED)
 else()
