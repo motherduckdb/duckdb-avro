@@ -7,7 +7,12 @@ find_path(AVRO_INCLUDE_DIR avro.h REQUIRED)
 find_library(AVRO_LIBRARY avro REQUIRED)
 find_library(JANSSON_LIBRARY jansson REQUIRED)
 find_library(LZMA_LIBRARY lzma REQUIRED)
-find_library(ZLIB_LIBRARY z REQUIRED)
+if(MSVC) # endless screaming
+  find_library(ZLIB_LIBRARY zlib REQUIRED)
+else()
+  find_library(ZLIB_LIBRARY z REQUIRED)
+endif()
+
 find_library(SNAPPY_LIBRARY snappy REQUIRED)
 set(ALL_AVRO_LIBRARIES
     ${AVRO_LIBRARY}
