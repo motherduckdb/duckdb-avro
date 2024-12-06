@@ -2,16 +2,18 @@ cmake_minimum_required(VERSION 3.10)
 
 # Set extension name here
 set(TARGET_NAME avro)
-
 find_path(AVRO_INCLUDE_DIR avro.h REQUIRED)
-find_library(AVRO_LIBRARY avro REQUIRED)
-find_library(JANSSON_LIBRARY jansson REQUIRED)
-find_library(LZMA_LIBRARY lzma REQUIRED)
 
 if(MSVC) # endless screaming
-  find_library(ZLIB_LIBRARY zlib REQUIRED)
+  find_library(AVRO_LIBRARY avro.lib REQUIRED)
+  find_library(JANSSON_LIBRARY jansson.lib REQUIRED)
+  find_library(LZMA_LIBRARY lzma.lib REQUIRED)
+  find_library(ZLIB_LIBRARY zlib.lib REQUIRED)
 else()
-  find_library(ZLIB_LIBRARY z REQUIRED)
+  find_library(AVRO_LIBRARY libavro.a REQUIRED)
+  find_library(JANSSON_LIBRARY libjansson.a REQUIRED)
+  find_library(LZMA_LIBRARY liblzma.a REQUIRED)
+  find_library(ZLIB_LIBRARY libz.a REQUIRED)
 endif()
 
 find_library(SNAPPY_LIBRARY snappy REQUIRED)
