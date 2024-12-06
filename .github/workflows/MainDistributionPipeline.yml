@@ -71,12 +71,6 @@ jobs:
           python-version: '3.11'
 
 
-      - uses: actions/checkout@v4
-        name: Checkout Extension CI tools
-        with:
-          path: 'extension-ci-tools'
-          ref: v1.1.3
-
 
 
       - name: Setup Ccache
