@@ -83,15 +83,15 @@ jobs:
         with:
           vcpkgGitCommitId: a1a1cbc975abf909a6c8985a6a2b8fe20bbd9bd6
           vcpkgGitURL: "https://github.com/microsoft/vcpkg.git"
-
-      - name: Run configure
-        shell: bash
-        env:
-          DUCKDB_PLATFORM: windows_amd64
-          DUCKDB_PLATFORM_RTOOLS: 0
-          DUCKDB_GIT_VERSION: v1.1.3
-        run: |
-          make configure_ci
+#
+#      - name: Run configure
+#        shell: bash
+#        env:
+#          DUCKDB_PLATFORM: windows_amd64
+#          DUCKDB_PLATFORM_RTOOLS: 0
+#          DUCKDB_GIT_VERSION: v1.1.3
+#        run: |
+#          make configure_ci
 
       - name: Build extension
         env:
@@ -102,5 +102,6 @@ jobs:
 
       - name: list
         if: failure()
+        shell: bash
         run: |
           find build/release
