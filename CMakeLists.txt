@@ -3,16 +3,21 @@ cmake_minimum_required(VERSION 3.5)
 # Set extension name here
 set(TARGET_NAME avro)
 
-# DuckDB's extension distribution supports vcpkg. As such, dependencies can be
-# added in ./vcpkg.json and then used in cmake with find_package. Feel free to
-# remove or replace with other dependencies. Note that it should also be removed
-# from vcpkg.json to prevent needlessly installing it..
-find_path(AVRO_INCLUDE_DIR avro.h)
-find_library(AVRO_LIBRARY avro)
-find_library(JANSSON_LIBRARY jansson)
-find_library(LZMA_LIBRARY lzma)
-find_library(ZLIB_LIBRARY z)
-find_library(SNAPPY_LIBRARY snappy)
+find_path(AVRO_INCLUDE_DIR avro.h REQUIRED)
+find_library(AVRO_LIBRARY avro REQUIRED)
+find_library(JANSSON_LIBRARY jansson REQUIRED)
+find_library(LZMA_LIBRARY lzma REQUIRED)
+find_library(ZLIB_LIBRARY z REQUIRED)
+find_library(SNAPPY_LIBRARY snappy REQUIRED)
+set(ALL_AVRO_LIBRARIES
+    ${AVRO_LIBRARY}
+    ${JEMALLOC_LIBRARY}
+    ${JANSSON_LIBRARY}
+    ${LZMA_LIBRARY}
+    ${ZLIB_LIBRARY}
+    ${SNAPPY_LIBRARY}
+    ${GMP_LIBRARY}
+    ${MATH_LIBRARY})
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
@@ -27,30 +32,9 @@ build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 
 include_directories(${AVRO_INCLUDE_DIR})
 
-# Link OpenSSL in both the static library as the loadable extension
-# target_link_libraries(${EXTENSION_NAME} Avro)
-# target_link_libraries(${LOADABLE_EXTENSION_NAME} Avro)
-target_link_libraries(
-  ${EXTENSION_NAME}
-  ${AVRO_LIBRARY}
-  ${JEMALLOC_LIBRARY}
-  ${JANSSON_LIBRARY}
-  ${LZMA_LIBRARY}
-  ${ZLIB_LIBRARY}
-  ${SNAPPY_LIBRARY}
-  ${GMP_LIBRARY}
-  ${MATH_LIBRARY})
+target_link_libraries(${EXTENSION_NAME} ${ALL_AVRO_LIBRARIES})
 
-target_link_libraries(
-  ${LOADABLE_EXTENSION_NAME}
-  ${AVRO_LIBRARY}
-  ${JEMALLOC_LIBRARY}
-  ${JANSSON_LIBRARY}
-  ${LZMA_LIBRARY}
-  ${ZLIB_LIBRARY}
-  ${SNAPPY_LIBRARY}
-  ${GMP_LIBRARY}
-  ${MATH_LIBRARY})
+target_link_libraries(${LOADABLE_EXTENSION_NAME} ${ALL_AVRO_LIBRARIES})
 
 install(
   TARGETS ${EXTENSION_NAME}
