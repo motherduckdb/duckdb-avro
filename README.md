@@ -1,7 +1,7 @@
 # The DuckDB Avro Extension
 This repo contains a DuckDB community extension that enables DuckDB to *read* [Apache Avro (TM)](https://avro.apache.org) files. Avro is the (self-declared) "leading serialization format for record data". Avro is a self-describing *row-major* binary table format. This is in contrast to the (much more popular) Parquet format that is *columnar*. Its row-major design enables Avro - for example - to handle appends of a few rows somewhat efficiently. 
 
-The extension does not contain Avro *write* functionality. This  on purpose, by not providing a writer we hope to decrease the amount of Avro files in the world over time. 
+The extension does not contain Avro *write* functionality. This is on purpose, by not providing a writer we hope to decrease the amount of Avro files in the world over time. 
 
 ### Installation & Loading
 Installation is simple through the DuckDB Community Extension repository, just type
