@@ -54,17 +54,6 @@ struct AvroOptions {
 
 struct AvroReader;
 
-struct AvroUnionData {
-
-  string file_name;
-  vector<string> names;
-  vector<LogicalType> types;
-  AvroOptions options;
-  unique_ptr<AvroReader> reader;
-
-  const string &GetFileName() { return file_name; }
-};
-
 // we use special transformation rules for unions with null:
 // 1) the null does not become a union entry and
 // 2) if there is only one entry the union disappears and is repaced by its
@@ -446,8 +435,24 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type,
   }
 }
 
+struct AvroUnionData {
+  string file_name;
+  vector<string> names;
+  vector<LogicalType> types;
+  AvroOptions options;
+  unique_ptr<AvroReader> reader;
+
+  const string &GetFileName() { return file_name; }
+};
+
 struct AvroReader {
+
   using UNION_READER_DATA = unique_ptr<AvroUnionData>;
+
+  static unique_ptr<AvroUnionData>
+  StoreUnionReader(unique_ptr<AvroReader> scan_p, idx_t file_idx) {
+    throw InternalException("union_by_name not supported");
+  }
 
   ~AvroReader() {
     avro_value_decref(&value);
@@ -530,18 +535,6 @@ struct AvroReader {
     avro_schema_decref(avro_schema);
   }
 
-  static unique_ptr<AvroUnionData>
-  StoreUnionReader(unique_ptr<AvroReader> scan_p, idx_t file_idx) {
-    auto data = make_uniq<AvroUnionData>();
-    data->file_name = scan_p->GetFileName();
-    data->options = scan_p->options;
-    data->names = scan_p->GetNames();
-    data->types = scan_p->GetTypes();
-    data->reader = std::move(scan_p);
-
-    return data;
-  }
-
   avro_file_reader_t reader;
   avro_value_t value;
   unique_ptr<Vector> read_vec;
@@ -563,42 +556,30 @@ struct AvroBindData : FunctionData {
   vector<string> names;
   vector<LogicalType> types;
   AvroOptions avro_options;
-  vector<unique_ptr<AvroUnionData>> union_readers;
   shared_ptr<AvroReader> initial_reader;
+
+  // unused
+  vector<unique_ptr<AvroUnionData>> union_readers;
 
   void Initialize(shared_ptr<AvroReader> reader) {
     initial_reader = std::move(reader);
     avro_options = initial_reader->options;
   }
 
+  void Initialize(ClientContext &, unique_ptr<AvroUnionData> &union_data) {
+    throw InternalException("union_by_name not supported");
+  }
+
   void Initialize(ClientContext &, shared_ptr<AvroReader> reader) {
     Initialize(reader);
   }
 
-  void Initialize(ClientContext &, unique_ptr<AvroUnionData> &union_data) {
-    Initialize(std::move(union_data->reader));
-    names = union_data->names;
-    types = union_data->types;
-    avro_options = union_data->options;
-    initial_reader = std::move(union_data->reader);
-  }
-
   bool Equals(const FunctionData &other_p) const override {
-    //   const AvroBindData &other = static_cast<const AvroBindData &>(other_p);
-    //   return avro_type == other.avro_type && duckdb_type ==
-    //   other.duckdb_type;
-    D_ASSERT(false); // FIXME
-    return false;
+    throw NotImplementedException("AvroBindData::Equals");
   }
 
   unique_ptr<FunctionData> Copy() const override {
-    //   auto bind_data = make_uniq<AvroBindData>();
-    //   bind_data->avro_type = avro_type;
-    //   bind_data->duckdb_type = duckdb_type;
-    D_ASSERT(false); // FIXME
-    return nullptr;
-    //
-    //   return bind_data;
+    throw NotImplementedException("AvroBindData::Copy");
   }
 };
 
@@ -622,6 +603,9 @@ AvroBindFunction(ClientContext &context, TableFunctionBindInput &input,
     throw InternalException("Unrecognized option %s", loption.c_str());
   }
 
+  if (result->avro_options.file_options.union_by_name) {
+    throw NotImplementedException("union_by_name for Avro reads");
+  }
   result->file_list =
       result->multi_file_reader->CreateFileList(context, filename);
 
@@ -660,8 +644,16 @@ static bool AvroNextFile(ClientContext &context, const AvroBindData &bind_data,
     D_ASSERT(file == initial_reader->filename);
     global_state.reader = initial_reader;
   } else {
-    global_state.reader =
+    auto new_reader =
         make_shared_ptr<AvroReader>(context, file, bind_data.avro_options);
+    if (new_reader->duckdb_type != global_state.reader->duckdb_type) {
+      throw InvalidInputException(
+          "Schema of file %s (%s) differs from first file %s (%s)",
+          new_reader->filename, new_reader->duckdb_type.ToString(),
+          global_state.reader->filename,
+          global_state.reader->duckdb_type.ToString());
+    }
+    global_state.reader = std::move(new_reader);
   }
 
   bind_data.multi_file_reader->InitializeReader(

@@ -573,4 +573,133 @@ reader.close()
 # detect recursive types or what happens here?
 
 
+# union by name
+
+
+json_schema = """
+{ "type": "record",
+ "name": "root",
+ "fields": [
+     {"name": "one", "type": "int"},
+     {"name": "two", "type": "double"},
+     {"name": "three", "type": "string"}
+ ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("union-name-1.avro", "wb"), DatumWriter(), schema)
+
+
+
+writer.append({ 'one' : 10, 'two' : 2.0, 'three': 's30'})
+writer.append({ 'one' : 11, 'two' : 2.1, 'three': 's31'})
+
+
+writer.close()
+
+reader = DataFileReader(open("union-name-1.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
+json_schema = """
+{ "type": "record",
+ "name": "root",
+ "fields": [
+      {"name": "two", "type": "double"},
+     {"name": "one", "type": "int"},
+     {"name": "three", "type": "string"}
+ ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("union-name-2.avro", "wb"), DatumWriter(), schema)
+
+
+
+writer.append({ 'one' : 12, 'two' : 2.2, 'three': 's32'})
+writer.append({ 'one' : 13, 'two' : 2.3, 'three': 's33'})
+
+
+writer.close()
+
+reader = DataFileReader(open("union-name-2.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+json_schema = """
+{ "type": "record",
+ "name": "root",
+ "fields": [
+      {"name": "three", "type": "string"},
+      {"name": "two", "type": "double"},
+     {"name": "one", "type": "int"}
+ ]
+}
+"""
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("union-name-3.avro", "wb"), DatumWriter(), schema)
+
+
+
+writer.append({ 'one' : 14, 'two' : 2.4, 'three': 's34'})
+writer.append({ 'one' : 15, 'two' : 2.5, 'three': 's35'})
+
+
+writer.close()
+
+reader = DataFileReader(open("union-name-3.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+json_schema = """
+{"type": "record",
+ "name": "root",
+ "fields": [
+      {"name": "c0", "type": "long"},
+      {"name": "c1", "type": "long"},
+      {"name": "c2", "type": "long"},
+      {"name": "c3", "type": "long"},
+      {"name": "c4", "type": "long"},
+      {"name": "c5", "type": "long"},
+      {"name": "c6", "type": "long"},
+      {"name": "c7", "type": "long"},
+      {"name": "c8", "type": "long"},
+      {"name": "c9", "type": "long"}
+ ]
+}
+"""
+
+n = 100000
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("bigdata.avro", "wb"), DatumWriter(), schema, codec="deflate")
+for r in range(1000000):
+    writer.append({f'c{i}': 10000000*i + r for i in range(10)})
+
+writer.close()
+
+
+count = 0
+reader = DataFileReader(open("bigdata.avro", "rb"), DatumReader())
+for user in reader:
+    count = count + 1
+reader.close()
+print(count)
 

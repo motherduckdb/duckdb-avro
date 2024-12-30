@@ -94,12 +94,6 @@ userdata4.avro	1000	286147.64
 userdata5.avro	1000	286384.03
 
 
-# with union_by_name wildcard
-
-query II
-FROM read_avro('test/userdata*.avro', union_by_name=True) SELECT count(*), max(salary) ;
-----
-4998	286735.82
 
 
 query II
@@ -112,7 +106,7 @@ favorite_color	VARCHAR
 statement error
 from read_avro(['test/userdata1.avro', 'test/users.avro'])
 ----
-schema mismatch
+Schema of file
 
 # example from readme
 query III
@@ -419,3 +413,15 @@ salary	DOUBLE
 title	VARCHAR
 comments	VARCHAR
 
+# union by name
+statement error
+FROM read_avro('test/union-name-*.avro', filename=true, union_by_name=true) order by one;
+----
+Not implemented Error: union_by_name for Avro reads
+
+
+# need to fail on differing types
+statement error
+FROM read_avro('test/union-name-*.avro', filename=true) order by one;
+----
+Schema of file

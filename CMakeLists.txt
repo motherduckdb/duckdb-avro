@@ -39,9 +39,7 @@ build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 
 include_directories(${AVRO_INCLUDE_DIR})
-
 target_link_libraries(${EXTENSION_NAME} ${ALL_AVRO_LIBRARIES})
-
 target_link_libraries(${LOADABLE_EXTENSION_NAME} ${ALL_AVRO_LIBRARIES})
 
 install(
