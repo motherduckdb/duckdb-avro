@@ -314,8 +314,7 @@ Incorrect Avro container file magic number
 statement error
 FROM read_avro('test/recursive.avro')
 ----
-Recursive Avro type LongList not supported
-
+Recursive Avro types not supported: LongList
 
 query II
 select column_name, column_type from (DESCRIBE FROM read_avro('test/broken_record.avro'));
@@ -425,3 +424,32 @@ statement error
 FROM read_avro('test/union-name-*.avro', filename=true) order by one;
 ----
 Schema of file
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/reuse-1.avro'));
+----
+request_id	VARCHAR
+client_version	STRUCT(major INTEGER, minor INTEGER)
+server_version	STRUCT(major INTEGER, minor INTEGER)
+
+query III
+FROM read_avro('test/reuse-1.avro')
+----
+hello	{'major': 4, 'minor': 2}	{'major': 8, 'minor': 5}
+world	{'major': 5, 'minor': 3}	{'major': 9, 'minor': 6}
+
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/reuse-2.avro'));
+----
+version	STRUCT(major INTEGER, minor INTEGER)
+details	STRUCT(release_version STRUCT(major INTEGER, minor INTEGER))
+
+query II
+FROM read_avro('test/reuse-2.avro')
+----
+{'major': 4, 'minor': 2}	{'release_version': {'major': 8, 'minor': 5}}
+{'major': 5, 'minor': 3}	{'release_version': {'major': 9, 'minor': 6}}
+

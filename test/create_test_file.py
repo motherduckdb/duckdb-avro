@@ -667,6 +667,115 @@ reader.close()
 
 
 
+
+json_schema = """
+{
+  "type": "record",
+  "name": "Request",
+  "namespace": "example.avro",
+  "fields": [
+    {
+      "name": "request_id",
+      "type": "string"
+    },
+    {
+      "name": "client_version",
+      "type": {
+        "type": "record",
+        "name": "Version",
+        "fields": [
+          {
+            "name": "major",
+            "type": "int"
+          },
+          {
+            "name": "minor",
+            "type": "int"
+          }
+        ]
+      }
+    },
+    {
+      "name": "server_version",
+      "type": "Version"
+    }
+  ]
+}
+"""
+
+
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("reuse-1.avro", "wb"), DatumWriter(), schema)
+
+
+writer.append({ 'request_id' : 'hello', 'client_version' : {'major': 4, 'minor' : 2}, 'server_version': {'major': 8, 'minor' : 5}})
+writer.append({ 'request_id' : 'world', 'client_version' : {'major': 5, 'minor' : 3}, 'server_version': {'major': 9, 'minor' : 6}})
+
+
+writer.close()
+
+reader = DataFileReader(open("reuse-1.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
+json_schema = """
+{
+  "type": "record",
+  "name": "Request",
+  "namespace": "example.avro",
+  "fields": [
+    {
+      "name": "version",
+      "type": {
+        "type": "record",
+        "name": "Version",
+        "fields": [
+          { "name": "major", "type": "int" },
+          { "name": "minor", "type": "int" }
+        ]
+      }
+    },
+    {
+      "name": "details",
+      "type": {
+        "type": "record",
+        "name": "Details",
+        "fields": [
+          { "name": "release_version", "type": "Version" }
+        ]
+      }
+    }
+  ]
+}
+"""
+
+
+
+schema = avro.schema.parse(json_schema)
+
+writer = DataFileWriter(open("reuse-2.avro", "wb"), DatumWriter(), schema)
+
+
+writer.append({ 'version' : {'major': 4, 'minor' : 2}, 'details': {'release_version': {'major': 8, 'minor' : 5}}})
+writer.append({ 'version' : {'major': 5, 'minor' : 3}, 'details': {'release_version': {'major': 9, 'minor' : 6}}})
+
+
+writer.close()
+
+reader = DataFileReader(open("reuse-2.avro", "rb"), DatumReader())
+for user in reader:
+    print(user)
+reader.close()
+
+
+
+
 json_schema = """
 {"type": "record",
  "name": "root",
@@ -702,4 +811,9 @@ for user in reader:
     count = count + 1
 reader.close()
 print(count)
+
+
+
+
+
 

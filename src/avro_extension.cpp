@@ -101,7 +101,8 @@ static LogicalType TransformAvroType(const AvroType &avro_type) {
   }
 }
 
-static AvroType TransformSchema(avro_schema_t &avro_schema) {
+static AvroType TransformSchema(avro_schema_t &avro_schema,
+                                unordered_set<string> parent_schema_names) {
   switch (avro_typeof(avro_schema)) {
   case AVRO_NULL:
     return AvroType(AVRO_NULL, LogicalType::SQLNULL);
@@ -126,7 +127,7 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
     unordered_map<idx_t, optional_idx> union_child_map;
     for (idx_t child_idx = 0; child_idx < num_children; child_idx++) {
       auto child_schema = avro_schema_union_branch(avro_schema, child_idx);
-      auto child_type = TransformSchema(child_schema);
+      auto child_type = TransformSchema(child_schema, parent_schema_names);
       union_children.push_back(std::pair<std::string, AvroType>(
           StringUtil::Format("u%llu", child_idx), std::move(child_type)));
       if (child_type.duckdb_type.id() != LogicalTypeId::SQLNULL) {
@@ -137,6 +138,13 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
                     union_child_map);
   }
   case AVRO_RECORD: {
+    auto schema_name = string(avro_schema_name(avro_schema));
+    if (parent_schema_names.find(schema_name) != parent_schema_names.end()) {
+      throw InvalidInputException("Recursive Avro types not supported: %s",
+                                  schema_name);
+    }
+    parent_schema_names.insert(schema_name);
+
     auto num_children = avro_schema_record_size(avro_schema);
     if (num_children == 0) {
       // this we just ignore but we need a marker so we don't get our offsets
@@ -147,7 +155,7 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
     for (idx_t child_idx = 0; child_idx < num_children; child_idx++) {
       auto child_schema =
           avro_schema_record_field_get_by_index(avro_schema, child_idx);
-      auto child_type = TransformSchema(child_schema);
+      auto child_type = TransformSchema(child_schema, parent_schema_names);
       auto child_name = avro_schema_record_field_name(avro_schema, child_idx);
       if (!child_name || strlen(child_name) == 0) {
         throw InvalidInputException("Empty avro field name");
@@ -176,7 +184,7 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
   }
   case AVRO_ARRAY: {
     auto child_schema = avro_schema_array_items(avro_schema);
-    auto child_type = TransformSchema(child_schema);
+    auto child_type = TransformSchema(child_schema, parent_schema_names);
     child_list_t<AvroType> list_children;
     list_children.push_back(
         std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
@@ -184,16 +192,16 @@ static AvroType TransformSchema(avro_schema_t &avro_schema) {
   }
   case AVRO_MAP: {
     auto child_schema = avro_schema_map_values(avro_schema);
-    auto child_type = TransformSchema(child_schema);
+    auto child_type = TransformSchema(child_schema, parent_schema_names);
     child_list_t<AvroType> map_children;
     map_children.push_back(
         std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
     return AvroType(AVRO_MAP, LogicalTypeId::MAP, std::move(map_children));
   }
-  case AVRO_LINK:
-    throw InvalidInputException("Recursive Avro type %s not supported",
-                                avro_schema_type_name(avro_schema));
-
+  case AVRO_LINK: {
+    auto target = avro_schema_link_target(avro_schema);
+    return TransformSchema(target, parent_schema_names);
+  }
   default:
     throw NotImplementedException("Unknown Avro Type %s",
                                   avro_schema_type_name(avro_schema));
@@ -435,7 +443,9 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type,
   }
 }
 
+// this is just a dummy to make the multi file reader compile
 struct AvroUnionData {
+  AvroUnionData() { throw InternalException("union_by_name not supported"); }
   string file_name;
   vector<string> names;
   vector<LogicalType> types;
@@ -511,7 +521,7 @@ struct AvroReader {
     }
 
     auto avro_schema = avro_file_reader_get_writer_schema(reader);
-    avro_type = TransformSchema(avro_schema);
+    avro_type = TransformSchema(avro_schema, {});
     duckdb_type = TransformAvroType(avro_type);
     read_vec = make_uniq<Vector>(duckdb_type);
 
