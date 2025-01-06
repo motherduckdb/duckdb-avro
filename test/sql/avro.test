@@ -45,8 +45,6 @@ Roy	3589146577885209	262816.87
 James	3589416270039051	211553.57
 Sean	NULL	NULL
 
-
-
 # usual suspect, the userdata1 file, this time with a filename arg
 query II
 select column_name, column_type from (DESCRIBE FROM read_avro('test/userdata1.avro', filename=true));
@@ -92,8 +90,6 @@ userdata2.avro	998	286587.01
 userdata3.avro	1000	286735.82
 userdata4.avro	1000	286147.64
 userdata5.avro	1000	286384.03
-
-
 
 
 query II
@@ -338,9 +334,10 @@ avro_schema	UNION(u0 STRUCT("data" BLOB), u1 STRUCT(fatal BOOLEAN, "name" VARCHA
 query I
 FROM read_avro('test/query_small.avro')
 ----
-NULL
-NULL
-NULL
+{'data': 100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A100,200,300,400\x0A300,400,500,600\x0A}
+{'bytesScanned': 1024, 'totalBytes': 1024}
+{'totalBytes': 1024}
+
 
 
 
@@ -354,16 +351,17 @@ events	STRUCT(cookie_id VARCHAR, tstamp BIGINT, edge VARCHAR, changes UNION(u0 S
 query II
 FROM read_avro('test/avro.avro')
 ----
-{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 133263e9e100000, 'tstamp': 1403721385042, 'edge': batchimport, 'changes': NULL}, {'cookie_id': 133263e9e100000, 'tstamp': 1403721385042, 'edge': batchimport, 'changes': NULL}]
-{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 134adb391b00000, 'tstamp': 1403721376988, 'edge': batchimport, 'changes': NULL}]
-{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 1317beb84b00000, 'tstamp': 1403721380452, 'edge': batchimport, 'changes': NULL}]
-{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 12b811f59080000, 'tstamp': 1403721375367, 'edge': batchimport, 'changes': NULL}]
-{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 134338dcf180000, 'tstamp': 1403721380483, 'edge': batchimport, 'changes': NULL}]
-{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 12aa3637e280000, 'tstamp': 1403721383922, 'edge': batchimport, 'changes': NULL}]
-{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 133bc9432a80000, 'tstamp': 1403721385810, 'edge': batchimport, 'changes': NULL}]
-{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 134dbec12c80000, 'tstamp': 1403721376778, 'edge': batchimport, 'changes': NULL}]
-{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 12bd0b8c6201000, 'tstamp': 1403721384549, 'edge': batchimport, 'changes': NULL}]
-{'cookie_id': NULL, 'segments': NULL, 'edges': NULL, 'behaviors': NULL, 'birthdate': NULL, 'association_ids': NULL}	[{'cookie_id': 13114ef2b401000, 'tstamp': 1403721375994, 'edge': batchimport, 'changes': NULL}]
+{'cookie_id': 133263e9e100000, 'segments': [], 'edges': {}, 'behaviors': {}, 'birthdate': 0, 'association_ids': {}}	[{'cookie_id': 133263e9e100000, 'tstamp': 1403721385042, 'edge': batchimport, 'changes': {'operation': REMOVE, 'association_id': NULL, 'network': et, 'segments': [49118]}}, {'cookie_id': 133263e9e100000, 'tstamp': 1403721385042, 'edge': batchimport, 'changes': {'operation': ADD, 'association_id': NULL, 'network': et, 'segments': [49117]}}]
+{'cookie_id': 134adb391b00000, 'segments': [], 'edges': {}, 'behaviors': {}, 'birthdate': 0, 'association_ids': {}}	[{'cookie_id': 134adb391b00000, 'tstamp': 1403721376988, 'edge': batchimport, 'changes': {'operation': ADD, 'association_id': NULL, 'network': et, 'segments': [49118]}}]
+{'cookie_id': 1317beb84b00000, 'segments': [], 'edges': {}, 'behaviors': {}, 'birthdate': 0, 'association_ids': {}}	[{'cookie_id': 1317beb84b00000, 'tstamp': 1403721380452, 'edge': batchimport, 'changes': {'operation': ADD, 'association_id': NULL, 'network': et, 'segments': [49118]}}]
+{'cookie_id': 12b811f59080000, 'segments': [], 'edges': {}, 'behaviors': {}, 'birthdate': 0, 'association_ids': {}}	[{'cookie_id': 12b811f59080000, 'tstamp': 1403721375367, 'edge': batchimport, 'changes': {'operation': ADD, 'association_id': NULL, 'network': et, 'segments': [49118]}}]
+{'cookie_id': 134338dcf180000, 'segments': [], 'edges': {}, 'behaviors': {}, 'birthdate': 0, 'association_ids': {}}	[{'cookie_id': 134338dcf180000, 'tstamp': 1403721380483, 'edge': batchimport, 'changes': {'operation': ADD, 'association_id': NULL, 'network': et, 'segments': [49118]}}]
+{'cookie_id': 12aa3637e280000, 'segments': [], 'edges': {}, 'behaviors': {}, 'birthdate': 0, 'association_ids': {}}	[{'cookie_id': 12aa3637e280000, 'tstamp': 1403721383922, 'edge': batchimport, 'changes': {'operation': ADD, 'association_id': NULL, 'network': et, 'segments': [49118]}}]
+{'cookie_id': 133bc9432a80000, 'segments': [], 'edges': {}, 'behaviors': {}, 'birthdate': 0, 'association_ids': {}}	[{'cookie_id': 133bc9432a80000, 'tstamp': 1403721385810, 'edge': batchimport, 'changes': {'operation': ADD, 'association_id': NULL, 'network': et, 'segments': [49118]}}]
+{'cookie_id': 134dbec12c80000, 'segments': [], 'edges': {}, 'behaviors': {}, 'birthdate': 0, 'association_ids': {}}	[{'cookie_id': 134dbec12c80000, 'tstamp': 1403721376778, 'edge': batchimport, 'changes': {'operation': ADD, 'association_id': NULL, 'network': et, 'segments': [49117]}}]
+{'cookie_id': 12bd0b8c6201000, 'segments': [], 'edges': {}, 'behaviors': {}, 'birthdate': 0, 'association_ids': {}}	[{'cookie_id': 12bd0b8c6201000, 'tstamp': 1403721384549, 'edge': batchimport, 'changes': {'operation': ADD, 'association_id': NULL, 'network': et, 'segments': [49118]}}]
+{'cookie_id': 13114ef2b401000, 'segments': [], 'edges': {}, 'behaviors': {}, 'birthdate': 0, 'association_ids': {}}	[{'cookie_id': 13114ef2b401000, 'tstamp': 1403721375994, 'edge': batchimport, 'changes': {'operation': ADD, 'association_id': NULL, 'network': et, 'segments': [49117]}}]
+
 
 
 
@@ -412,6 +410,7 @@ salary	DOUBLE
 title	VARCHAR
 comments	VARCHAR
 
+
 # union by name
 statement error
 FROM read_avro('test/union-name-*.avro', filename=true, union_by_name=true) order by one;
@@ -424,6 +423,7 @@ statement error
 FROM read_avro('test/union-name-*.avro', filename=true) order by one;
 ----
 Schema of file
+
 
 
 query II
@@ -452,4 +452,17 @@ FROM read_avro('test/reuse-2.avro')
 ----
 {'major': 4, 'minor': 2}	{'release_version': {'major': 8, 'minor': 5}}
 {'major': 5, 'minor': 3}	{'release_version': {'major': 9, 'minor': 6}}
+
+
+query II
+select column_name, column_type from (DESCRIBE FROM read_avro('test/union.avro'));
+----
+event	UNION(u0 STRUCT(id VARCHAR, "timestamp" BIGINT, "data" VARCHAR), u1 STRUCT(id VARCHAR, "timestamp" BIGINT, updatedData VARCHAR), u2 STRUCT(id VARCHAR, "timestamp" BIGINT))
+
+query I
+FROM read_avro('test/union.avro')
+----
+{'id': 1, 'timestamp': 1704367260, 'data': New record created}
+{'id': 1, 'timestamp': 1704367360, 'updatedData': Record updated}
+{'id': 1, 'timestamp': 1704367460}
 

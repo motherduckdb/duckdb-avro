@@ -213,7 +213,7 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type,
 
   switch (avro_type.duckdb_type.id()) {
   case LogicalTypeId::SQLNULL: {
-    FlatVector::Validity(target).SetInvalid(out_idx);
+    FlatVector::SetNull(target, out_idx, true);
     break;
   }
   case LogicalTypeId::BOOLEAN: {
@@ -363,24 +363,35 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type,
       throw InvalidInputException("Invalid union tag");
     }
 
-    FlatVector::SetNull(target, out_idx, true);
-
-    if (avro_type.children[discriminant].second.duckdb_type !=
+    if (avro_type.children[discriminant].second.duckdb_type ==
         LogicalTypeId::SQLNULL) {
+      FlatVector::SetNull(target, out_idx, true);
+      break;
+    }
+
+    if (target.GetType().id() == LogicalTypeId::UNION) {
       auto duckdb_child_index =
           avro_type.union_child_map.at(discriminant).GetIndex();
-      if (target.GetType().id() == LogicalTypeId::UNION) {
-        auto &tags = UnionVector::GetTags(target);
-        FlatVector::GetData<union_tag_t>(tags)[out_idx] = duckdb_child_index;
-        FlatVector::SetNull(tags, out_idx, false);
-        auto &union_vector = UnionVector::GetMember(target, duckdb_child_index);
-        TransformValue(&union_value, avro_type.children[discriminant].second,
-                       union_vector, out_idx);
-      } else { // directly recurse, we have dissolved the union
-        TransformValue(&union_value, avro_type.children[discriminant].second,
-                       target, out_idx);
+      auto &tags = UnionVector::GetTags(target);
+      FlatVector::GetData<union_tag_t>(tags)[out_idx] = duckdb_child_index;
+      auto &union_vector = UnionVector::GetMember(target, duckdb_child_index);
+
+      // orrrrrrrrrrrrr
+      for (idx_t child_idx = 1;
+           child_idx < StructVector::GetEntries(target).size(); child_idx++) {
+        if (child_idx !=
+            duckdb_child_index +
+                1) { // duckdb child index is bigger because of the tag
+          FlatVector::SetNull(*StructVector::GetEntries(target)[child_idx],
+                              out_idx, true);
+        }
       }
-      FlatVector::Validity(target).SetValid(out_idx);
+
+      TransformValue(&union_value, avro_type.children[discriminant].second,
+                     union_vector, out_idx);
+    } else { // directly recurse, we have dissolved the union
+      TransformValue(&union_value, avro_type.children[discriminant].second,
+                     target, out_idx);
     }
 
     break;
@@ -490,7 +501,6 @@ struct AvroReader {
     } else {
       output.data[column_ids[0]].Reference(*read_vec);
     }
-
     output.SetCardinality(out_idx);
   }
 
