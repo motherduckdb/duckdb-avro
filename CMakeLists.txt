@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.10)
 
 # Set extension name here
 set(TARGET_NAME avro)
-find_path(AVRO_INCLUDE_DIR avro.h REQUIRED)
+
+find_path(AVRO_INCLUDE_DIR NAMES avro.h PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include" PATH_SUFFIXES avro REQUIRED)
 
 if(MSVC) # endless screaming
   find_library(AVRO_LIBRARY avro.lib REQUIRED)
@@ -38,7 +39,8 @@ set(EXTENSION_SOURCES src/avro_extension.cpp)
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 
-include_directories(${AVRO_INCLUDE_DIR})
+target_include_directories(${EXTENSION_NAME} PRIVATE ${AVRO_INCLUDE_DIR})
+target_include_directories(${LOADABLE_EXTENSION_NAME} PRIVATE ${AVRO_INCLUDE_DIR})
 target_link_libraries(${EXTENSION_NAME} ${ALL_AVRO_LIBRARIES})
 target_link_libraries(${LOADABLE_EXTENSION_NAME} ${ALL_AVRO_LIBRARIES})
 
