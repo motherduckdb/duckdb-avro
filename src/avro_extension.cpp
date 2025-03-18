@@ -521,7 +521,14 @@ struct AvroReader {
 
     auto file = fs.OpenFile(filename, FileOpenFlags::FILE_FLAGS_READ);
     allocated_data = Allocator::Get(context).Allocate(file->GetFileSize());
-    auto n_read = file->Read(allocated_data.get(), allocated_data.GetSize());
+    auto n_read = 0ll;
+    while (n_read < file->GetFileSize()) {
+	auto len = file->Read(allocated_data.get() + n_read, allocated_data.GetSize() - n_read);
+	n_read += len;
+        if (len == 0) {
+            throw InvalidInputException("Could not read from file '%s'", filename);
+        }
+    }
     D_ASSERT(n_read == file->GetFileSize());
     auto avro_reader = avro_reader_memory(
         const_char_ptr_cast(allocated_data.get()), allocated_data.GetSize());
