@@ -9,21 +9,18 @@ vcpkg_from_github(
         no-werror.patch
         pkgconfig.diff
 )
-
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(VCPKG_CXX_FLAGS " -fPIC ${VCPKG_CXX_FLAGS}" CACHE STRING "")
-set(VCPKG_C_FLAGS " -fPIC ${VCPKG_C_FLAGS}" CACHE STRING "")
-
 file(COPY "${CURRENT_PORT_DIR}/snappy.pc.in" DESTINATION "${SOURCE_PATH}")
+
+if(VCPKG_TARGET_ARCHITECTURE STREQUAL "wasm32")
+    set(WASM_OPTIONS -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_CXX_FLAGS=-fPIC -DCMAKE_C_FLAGS=-fPIC)
+endif()
 
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS
         -DSNAPPY_BUILD_TESTS=OFF
         -DSNAPPY_BUILD_BENCHMARKS=OFF
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-        -DCMAKE_CXX_FLAGS=-fPIC
-        -DCMAKE_C_FLAGS=-fPIC
+        ${WASM_OPTIONS}
 
         # These variables can be overriden in a custom triplet, see usage file
         -DSNAPPY_HAVE_SSSE3=OFF
