@@ -8,11 +8,6 @@ vcpkg_from_github(
         build-tools.patch
 )
 
-
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(VCPKG_CXX_FLAGS " -fPIC ${VCPKG_CXX_FLAGS}" CACHE STRING "")
-set(VCPKG_C_FLAGS " -fPIC ${VCPKG_C_FLAGS}" CACHE STRING "")
-
 vcpkg_check_features(OUT_FEATURE_OPTIONS FEATURE_OPTIONS
     FEATURES
         tools BUILD_TOOLS
