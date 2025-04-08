@@ -51,9 +51,6 @@ void AvroMultiFileInfo::BindReader(ClientContext &context, vector<LogicalType> &
 }
 
 void AvroMultiFileInfo::FinalizeBindData(MultiFileBindData &multi_file_data) {
-	if (multi_file_data.reader_bind.file_row_number_idx != DConstants::INVALID_INDEX) {
-		throw NotImplementedException("'file_row_number' not supported by Avro reader yet");
-	}
 }
 
 void AvroMultiFileInfo::GetBindInfo(const TableFunctionData &bind_data, BindInfo &info) {
