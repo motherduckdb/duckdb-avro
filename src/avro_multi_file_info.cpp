@@ -3,10 +3,6 @@
 
 namespace duckdb {
 
-		//if (!AvroNextFile(context, bind_data, global_state, nullptr)) {
-		//	return;
-		//}
-
 unique_ptr<BaseFileReaderOptions> AvroMultiFileInfo::InitializeOptions(ClientContext &context,
                                                                        optional_ptr<TableFunctionInfo> info) {
 	return make_uniq<AvroFileReaderOptions>();
@@ -89,15 +85,7 @@ public:
 	explicit AvroFileLocalState(ExecutionContext &execution_context) : execution_context(execution_context) {};
 public:
 	shared_ptr<AvroReader> file_scan;
-
 	ExecutionContext &execution_context;
-
-	////! Each local state refers to an Avro Scan on a local file
-	//unique_ptr<AvroScanFunctionData> local_avro_function_data;
-	//unique_ptr<TableFunctionInitInput> init_input;
-	//unique_ptr<GlobalTableFunctionState> local_avro_global_state;
-	//unique_ptr<LocalTableFunctionState> local_avro_local_state;
-	//unique_ptr<TableFunctionInput> table_function_input;
 };
 
 unique_ptr<LocalTableFunctionState> AvroMultiFileInfo::InitializeLocalState(ExecutionContext &context,
@@ -172,10 +160,7 @@ unique_ptr<BaseStatistics> AvroMultiFileInfo::GetStatistics(ClientContext &conte
 }
 
 double AvroMultiFileInfo::GetProgressInFile(ClientContext &context, const BaseFileReader &reader) {
-	//auto &file_scan = reader.Cast<AvroReader>();
-	//D_ASSERT(is_memory_io(file_scan.reader.reader));
-	//struct _avro_reader_memory_t *mem_reader = avro_reader_to_memory(&file_scan.reader.reader);
-	//return 100.0 * (mem_reader->read / mem_reader->len);
+	//! TODO: interrogate the avro reader to figure out the progress of the memory reader
 	return 0;
 }
 
