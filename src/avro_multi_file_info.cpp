@@ -100,15 +100,15 @@ shared_ptr<BaseFileReader> AvroMultiFileInfo::CreateReader(ClientContext &contex
 }
 
 shared_ptr<BaseFileReader> AvroMultiFileInfo::CreateReader(ClientContext &context, GlobalTableFunctionState &gstate_p,
-                                                           const string &filename, idx_t file_idx,
+                                                           const OpenFileInfo &file, idx_t file_idx,
                                                            const MultiFileBindData &bind_data) {
-	return make_shared_ptr<AvroReader>(context, filename);
+	return make_shared_ptr<AvroReader>(context, file.path);
 }
 
-shared_ptr<BaseFileReader> AvroMultiFileInfo::CreateReader(ClientContext &context, const string &filename,
+shared_ptr<BaseFileReader> AvroMultiFileInfo::CreateReader(ClientContext &context, const OpenFileInfo &file,
                                                            AvroFileReaderOptions &options,
                                                            const MultiFileOptions &file_options) {
-	return make_shared_ptr<AvroReader>(context, filename);
+	return make_shared_ptr<AvroReader>(context, file.path);
 }
 
 shared_ptr<BaseUnionData> AvroMultiFileInfo::GetUnionData(shared_ptr<BaseFileReader> scan_p, idx_t file_idx) {
