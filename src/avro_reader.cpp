@@ -115,9 +115,14 @@ AvroReader::AvroReader(ClientContext &context, string filename_p) : BaseFileRead
 	allocated_data = Allocator::Get(context).Allocate(file->GetFileSize());
 	auto total_size = allocated_data.GetSize();
 	auto data = allocated_data.get();
-	auto n_read = file->Read(data, total_size);
-	D_ASSERT(n_read == file->GetFileSize());
-	auto avro_reader = avro_reader_memory(const_char_ptr_cast(allocated_data.get()), allocated_data.GetSize());
+
+	auto buf_handle = file->Read(data, total_size);
+	auto autual_data = buf_handle.Ptr();
+
+
+//	D_ASSERT(n_read == file->GetFileSize());
+	auto avro_reader = avro_reader_memory(const_char_ptr_cast(autual_data), total_size);
+
 
 	if (avro_reader_reader(avro_reader, &reader)) {
 		throw InvalidInputException(avro_strerror());
