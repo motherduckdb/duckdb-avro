@@ -1,5 +1,6 @@
 #include "avro_reader.hpp"
 #include "utf8proc_wrapper.hpp"
+#include "duckdb/storage/caching_file_system.hpp"
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/multi_file/multi_file_data.hpp"
 
@@ -103,14 +104,18 @@ static AvroType TransformSchema(avro_schema_t &avro_schema, unordered_set<string
 }
 
 AvroReader::AvroReader(ClientContext &context, string filename_p) : BaseFileReader(std::move(filename_p)) {
+	auto caching_file_system = CachingFileSystem::Get(context);
 	auto &fs = FileSystem::GetFileSystem(context);
 	if (!fs.FileExists(this->file.path)) {
 		throw InvalidInputException("Avro file %s not found", this->file.path);
 	}
 
-	auto file = fs.OpenFile(this->file.path, FileOpenFlags::FILE_FLAGS_READ);
+	auto file = caching_file_system.OpenFile(this->file.path, FileOpenFlags::FILE_FLAGS_READ);
+//	auto file = fs.OpenFile(this->file.path, FileOpenFlags::FILE_FLAGS_READ);
 	allocated_data = Allocator::Get(context).Allocate(file->GetFileSize());
-	auto n_read = file->Read(allocated_data.get(), allocated_data.GetSize());
+	auto total_size = allocated_data.GetSize();
+	auto data = allocated_data.get();
+	auto n_read = file->Read(data, total_size);
 	D_ASSERT(n_read == file->GetFileSize());
 	auto avro_reader = avro_reader_memory(const_char_ptr_cast(allocated_data.get()), allocated_data.GetSize());
 
