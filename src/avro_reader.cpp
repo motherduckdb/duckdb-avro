@@ -110,18 +110,17 @@ AvroReader::AvroReader(ClientContext &context, string filename_p) : BaseFileRead
 		throw InvalidInputException("Avro file %s not found", this->file.path);
 	}
 
-	auto file = caching_file_system.OpenFile(this->file.path, FileOpenFlags::FILE_FLAGS_READ);
-//	auto file = fs.OpenFile(this->file.path, FileOpenFlags::FILE_FLAGS_READ);
-	allocated_data = Allocator::Get(context).Allocate(file->GetFileSize());
+	auto caching_file_handle = caching_file_system.OpenFile(this->file.path, FileOpenFlags::FILE_FLAGS_READ);
+	allocated_data = Allocator::Get(context).Allocate(caching_file_handle->GetFileSize());
 	auto total_size = allocated_data.GetSize();
 	auto data = allocated_data.get();
 
-	auto buf_handle = file->Read(data, total_size);
-	auto autual_data = buf_handle.Ptr();
+	auto buf_handle = caching_file_handle->Read(data, total_size);
+	auto buffer_data = buf_handle.Ptr();
 
-
-//	D_ASSERT(n_read == file->GetFileSize());
-	auto avro_reader = avro_reader_memory(const_char_ptr_cast(autual_data), total_size);
+	D_ASSERT(buf_handle.IsValid());
+	D_ASSERT(buffer_data == data);
+	auto avro_reader = avro_reader_memory(const_char_ptr_cast(buffer_data), total_size);
 
 
 	if (avro_reader_reader(avro_reader, &reader)) {
