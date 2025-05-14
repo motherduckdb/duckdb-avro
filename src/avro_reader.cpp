@@ -122,7 +122,6 @@ AvroReader::AvroReader(ClientContext &context, string filename_p) : BaseFileRead
 	D_ASSERT(buffer_data == data);
 	auto avro_reader = avro_reader_memory(const_char_ptr_cast(buffer_data), total_size);
 
-
 	if (avro_reader_reader(avro_reader, &reader)) {
 		throw InvalidInputException(avro_strerror());
 	}
