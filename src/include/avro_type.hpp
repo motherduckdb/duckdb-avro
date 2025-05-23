@@ -3,6 +3,7 @@
 #include "duckdb/common/types.hpp"
 #include <avro.h>
 #include "duckdb/common/optional_idx.hpp"
+#include "duckdb/common/limits.hpp"
 
 namespace duckdb {
 
@@ -71,6 +72,7 @@ public:
 	avro_type_t avro_type;
 	child_list_t<AvroType> children;
 	unordered_map<idx_t, optional_idx> union_child_map;
+	int32_t field_id = NumericLimits<int32_t>::Maximum();
 };
 
 } // namespace duckdb

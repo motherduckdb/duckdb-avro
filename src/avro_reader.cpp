@@ -57,6 +57,7 @@ static AvroType TransformSchema(avro_schema_t &avro_schema, unordered_set<string
 		for (idx_t child_idx = 0; child_idx < num_children; child_idx++) {
 			auto child_schema = avro_schema_record_field_get_by_index(avro_schema, child_idx);
 			auto child_type = TransformSchema(child_schema, parent_schema_names);
+			child_type.field_id = avro_schema_record_field_id(avro_schema, child_idx);
 			auto child_name = avro_schema_record_field_name(avro_schema, child_idx);
 			if (!child_name || strlen(child_name) == 0) {
 				throw InvalidInputException("Empty avro field name");

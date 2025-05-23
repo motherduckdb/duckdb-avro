@@ -1,0 +1,93 @@
+diff --git a/lang/c/src/avro/schema.h b/lang/c/src/avro/schema.h
+index 51d456155..3c253adc1 100644
+--- a/lang/c/src/avro/schema.h
++++ b/lang/c/src/avro/schema.h
+@@ -43,6 +43,7 @@ avro_schema_t avro_schema_null(void);
+ avro_schema_t avro_schema_record(const char *name, const char *space);
+ avro_schema_t avro_schema_record_field_get(const avro_schema_t
+ 					   record, const char *field_name);
++int32_t avro_schema_record_field_id(const avro_schema_t record, int index);
+ const char *avro_schema_record_field_name(const avro_schema_t schema, int index);
+ int avro_schema_record_field_get_index(const avro_schema_t schema,
+ 				       const char *field_name);
+diff --git a/lang/c/src/schema.c b/lang/c/src/schema.c
+index 7b389002b..b6492c654 100644
+--- a/lang/c/src/schema.c
++++ b/lang/c/src/schema.c
+@@ -694,6 +694,16 @@ avro_schema_t avro_schema_record_field_get(const avro_schema_t
+ 	return val.field->type;
+ }
+ 
++int32_t avro_schema_record_field_id(const avro_schema_t schema, int index)
++{
++	union {
++		st_data_t data;
++		struct avro_record_field_t *field;
++	} val;
++	st_lookup(avro_schema_to_record(schema)->fields, index, &val.data);
++	return val.field->field_id;
++}
++
+ int avro_schema_record_field_get_index(const avro_schema_t schema,
+ 				       const char *field_name)
+ {
+@@ -872,6 +882,15 @@ avro_type_from_json_t(json_t *json, avro_type_t *type,
+ 	return 0;
+ }
+ 
++static int
++field_id_from_json_t(json_t *json, int32_t *field_id)
++{
++	if (json != NULL && json_is_integer(json)) {
++		*field_id = json_integer_value(json);
++	}
++	return 0;
++}
++
+ static int
+ avro_schema_from_json_t(json_t *json, avro_schema_t *schema,
+ 			st_table *named_schemas, const char *parent_namespace)
+@@ -979,7 +998,9 @@ avro_schema_from_json_t(json_t *json, avro_schema_t *schema,
+ 				    json_array_get(json_fields, i);
+ 				json_t *json_field_name;
+ 				json_t *json_field_type;
++				json_t *json_field_field_id;
+ 				avro_schema_t json_field_type_schema;
++				int32_t field_id = INT32_MAX;
+ 				int field_rval;
+ 
+ 				if (!json_is_object(json_field)) {
+@@ -1001,6 +1022,8 @@ avro_schema_from_json_t(json_t *json, avro_schema_t *schema,
+ 					avro_schema_decref(*schema);
+ 					return EINVAL;
+ 				}
++				json_field_field_id =
++				    json_object_get(json_field, "field-id");
+ 				field_rval =
+ 				    avro_schema_from_json_t(json_field_type,
+ 							    &json_field_type_schema,
+@@ -1010,6 +1033,12 @@ avro_schema_from_json_t(json_t *json, avro_schema_t *schema,
+ 					avro_schema_decref(*schema);
+ 					return field_rval;
+ 				}
++				field_rval =
++					field_id_from_json_t(json_field_field_id, &field_id);
++				if (field_rval) {
++					avro_schema_decref(*schema);
++					return field_rval;
++				}
+ 				field_rval =
+ 				    avro_schema_record_field_append(*schema,
+ 								    json_string_value
+diff --git a/lang/c/src/schema.h b/lang/c/src/schema.h
+index 3c99ee630..c1f5f4c58 100644
+--- a/lang/c/src/schema.h
++++ b/lang/c/src/schema.h
+@@ -27,6 +27,7 @@ struct avro_record_field_t {
+ 	int index;
+ 	char *name;
+ 	avro_schema_t type;
++	int32_t field_id;
+ 	/*
+ 	 * TODO: default values 
+ 	 */
