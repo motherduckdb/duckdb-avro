@@ -4,6 +4,7 @@
 #include <avro.h>
 #include "duckdb/common/optional_idx.hpp"
 #include "duckdb/common/limits.hpp"
+#include "duckdb/common/multi_file/multi_file_data.hpp"
 
 namespace duckdb {
 
@@ -21,50 +22,87 @@ public:
 		return duckdb_type == other.duckdb_type && avro_type == other.avro_type && children == other.children &&
 		       union_child_map == other.union_child_map;
 	}
-
+	const bool HasFieldId() const {
+		return field_id != NumericLimits<int32_t>::Maximum();
+	}
+	const int32_t GetFieldId() const {
+		D_ASSERT(HasFieldId());
+		return field_id;
+	}
 public:
 	// we use special transformation rules for unions with null:
 	// 1) the null does not become a union entry and
 	// 2) if there is only one entry the union disappears and is repaced by its
 	// child
-	static LogicalType TransformAvroType(const AvroType &avro_type) {
-		child_list_t<LogicalType> children;
+	static MultiFileColumnDefinition TransformAvroType(const string &name, const AvroType &avro_type) {
+		vector<MultiFileColumnDefinition> children;
 
+		LogicalType duckdb_type;
 		switch (avro_type.duckdb_type.id()) {
 		case LogicalTypeId::STRUCT: {
+			child_list_t<LogicalType> type_children;
 			for (auto &child : avro_type.children) {
-				children.push_back(std::pair<std::string, LogicalType>(child.first, TransformAvroType(child.second)));
+				auto child_col = TransformAvroType(child.first, child.second);
+				type_children.emplace_back(child_col.name, child_col.type);
+				children.push_back(std::move(child_col));
 			}
-			D_ASSERT(!children.empty());
-			return LogicalType::STRUCT(std::move(children));
+			D_ASSERT(!type_children.empty());
+			duckdb_type = LogicalType::STRUCT(std::move(type_children));
+			break;
 		}
-		case LogicalTypeId::LIST:
-			return LogicalType::LIST(TransformAvroType(avro_type.children[0].second));
+		case LogicalTypeId::LIST: {
+			auto element = TransformAvroType("element", avro_type.children[0].second);
+			duckdb_type = LogicalType::LIST(element.type);
+			children.push_back(std::move(element));
+			break;
+		}
 		case LogicalTypeId::MAP: {
-			child_list_t<LogicalType> children;
-			children.push_back(std::pair<std::string, LogicalType>("key", LogicalType::VARCHAR));
-			children.push_back(
-			    std::pair<std::string, LogicalType>("value", TransformAvroType(avro_type.children[0].second)));
-			return LogicalType::MAP(LogicalType::STRUCT(std::move(children)));
+			child_list_t<LogicalType> type_children;
+			//! FIXME: we're losing the field-id of the 'key' of the MAP here, no??
+			auto key = MultiFileColumnDefinition("key", LogicalType::VARCHAR);
+			auto value = TransformAvroType("value", avro_type.children[0].second);
+
+			type_children.emplace_back(key.name, key.type);
+			type_children.emplace_back(value.name, value.type);
+			duckdb_type = LogicalType::MAP(LogicalType::STRUCT(std::move(type_children)));
+			children.push_back(std::move(key));
+			children.push_back(std::move(value));
+			break;
 		}
 		case LogicalTypeId::UNION: {
 			for (auto &child : avro_type.children) {
 				if (child.second.duckdb_type == LogicalTypeId::SQLNULL) {
 					continue;
 				}
-				children.push_back(std::pair<std::string, LogicalType>(child.first, TransformAvroType(child.second)));
+				auto member = TransformAvroType(child.first, child.second);
+				children.push_back(std::move(member));
 			}
 			if (children.size() == 1) {
-				return children[0].second;
+				children[0].name = name;
+				return std::move(children[0]);
 			}
 			if (children.empty()) {
 				throw InvalidInputException("Empty union type");
 			}
-			return LogicalType::UNION(std::move(children));
+			
+			child_list_t<LogicalType> type_children;
+			for (auto &child : children) {
+				type_children.emplace_back(child.name, child.type);
+			}
+			duckdb_type = LogicalType::UNION(std::move(type_children));
+			break;
 		}
 		default:
-			return LogicalType(avro_type.duckdb_type);
+			duckdb_type = LogicalType(avro_type.duckdb_type);
+			break;
 		}
+
+		MultiFileColumnDefinition result(name, duckdb_type);
+		result.children = std::move(children);
+		if (avro_type.HasFieldId()) {
+			result.identifier = Value::INTEGER(avro_type.GetFieldId());
+		}
+		return result;
 	}
 
 public:

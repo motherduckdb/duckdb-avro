@@ -128,29 +128,25 @@ AvroReader::AvroReader(ClientContext &context, string filename_p) : BaseFileRead
 	}
 
 	auto avro_schema = avro_file_reader_get_writer_schema(reader);
+	auto schema_name = avro_schema_name(avro_schema);
+	string root_name = schema_name ? schema_name : "avro_schema";
+
 	avro_type = TransformSchema(avro_schema, {});
-	duckdb_type = AvroType::TransformAvroType(avro_type);
+	auto root = AvroType::TransformAvroType(root_name, avro_type);
+	duckdb_type = root.type;
 	read_vec = make_uniq<Vector>(duckdb_type);
 
 	auto interface = avro_generic_class_from_schema(avro_schema);
 	avro_generic_value_new(interface, &value);
 	avro_value_iface_decref(interface);
 
-	vector<LogicalType> types;
-	vector<string> names;
 	// special handling for root structs, we pull up the entries
 	if (duckdb_type.id() == LogicalTypeId::STRUCT) {
-		for (idx_t child_idx = 0; child_idx < StructType::GetChildCount(duckdb_type); child_idx++) {
-			names.push_back(StructType::GetChildName(duckdb_type, child_idx));
-			types.push_back(StructType::GetChildType(duckdb_type, child_idx));
-		}
+		columns = std::move(root.children);
 	} else {
-		auto schema_name = avro_schema_name(avro_schema);
-		names.push_back(schema_name ? schema_name : "avro_schema");
-		types.push_back(duckdb_type);
+		columns.clear();
+		columns.push_back(std::move(root));
 	}
-
-	columns = MultiFileColumnDefinition::ColumnsFromNamesAndTypes(names, types);
 	avro_schema_decref(avro_schema);
 }
 
