@@ -83,16 +83,26 @@ static AvroType TransformSchema(avro_schema_t &avro_schema, unordered_set<string
 	}
 	case AVRO_ARRAY: {
 		auto child_schema = avro_schema_array_items(avro_schema);
+		auto element_id = avro_schema_array_element_id(avro_schema);
 		auto child_type = TransformSchema(child_schema, parent_schema_names);
+		child_type.field_id = element_id;
 		child_list_t<AvroType> list_children;
 		list_children.push_back(std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
-		return AvroType(AVRO_ARRAY, LogicalTypeId::LIST, std::move(list_children));
+		auto res = AvroType(AVRO_ARRAY, LogicalTypeId::LIST, std::move(list_children));
 	}
 	case AVRO_MAP: {
 		auto child_schema = avro_schema_map_values(avro_schema);
-		auto child_type = TransformSchema(child_schema, parent_schema_names);
+		auto key_id = avro_schema_map_key_id(avro_schema);
+		auto value_id = avro_schema_map_value_id(avro_schema);
+
+		AvroType key_type(AVRO_STRING, LogicalTypeId::VARCHAR);
+		key_type.field_id = key_id;
+		auto value_type = TransformSchema(child_schema, parent_schema_names);
+		value_type.field_id = value_id;
+
 		child_list_t<AvroType> map_children;
-		map_children.push_back(std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
+		map_children.push_back(std::pair<std::string, AvroType>("key_entry", std::move(key_type)));
+		map_children.push_back(std::pair<std::string, AvroType>("value_entry", std::move(value_type)));
 		return AvroType(AVRO_MAP, LogicalTypeId::MAP, std::move(map_children));
 	}
 	case AVRO_LINK: {

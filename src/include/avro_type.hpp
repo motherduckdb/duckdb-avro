@@ -58,9 +58,8 @@ public:
 		}
 		case LogicalTypeId::MAP: {
 			child_list_t<LogicalType> type_children;
-			//! FIXME: we're losing the field-id of the 'key' of the MAP here, no??
-			auto key = MultiFileColumnDefinition("key", LogicalType::VARCHAR);
-			auto value = TransformAvroType("value", avro_type.children[0].second);
+			auto key = TransformAvroType("key", avro_type.children[0].second);
+			auto value = TransformAvroType("value", avro_type.children[1].second);
 
 			type_children.emplace_back(key.name, key.type);
 			type_children.emplace_back(value.name, value.type);
