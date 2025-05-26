@@ -51,7 +51,7 @@ index c9d4dfeb6..ce7f41740 100644
  	if (meta_iface == NULL) {
  		return EILSEQ;
 diff --git a/lang/c/src/schema.c b/lang/c/src/schema.c
-index 7b389002b..092699fa8 100644
+index 7b389002b..3c284d857 100644
 --- a/lang/c/src/schema.c
 +++ b/lang/c/src/schema.c
 @@ -443,7 +443,7 @@ avro_schema_t avro_schema_union_branch_by_name
@@ -282,6 +282,66 @@ index 7b389002b..092699fa8 100644
  			avro_schema_decref(items_copy);
  		}
  		break;
+@@ -1683,6 +1753,16 @@ static int avro_write_str(avro_writer_t out, const char *str)
+ {
+ 	return avro_write(out, (char *)str, strlen(str));
+ }
++static int avro_write_int(avro_writer_t out, int32_t integer)
++{
++	char buffer[11];
++	
++	int ret = snprintf(buffer, 11, "%d", integer);
++	if (ret < 0) {
++		return 1;
++	}
++	return avro_write(out, buffer, ret);
++}
+ 
+ static int write_field(avro_writer_t out, const struct avro_record_field_t *field,
+ 		       const char *parent_namespace)
+@@ -1692,6 +1772,10 @@ static int write_field(avro_writer_t out, const struct avro_record_field_t *fiel
+ 	check(rval, avro_write_str(out, field->name));
+ 	check(rval, avro_write_str(out, "\",\"type\":"));
+ 	check(rval, avro_schema_to_json2(field->type, out, parent_namespace));
++	if (field->field_id != INT32_MAX) {
++		check(rval, avro_write_str(out, "\",\"field-id\":"));
++		check(rval, avro_write_int(out, field->field_id));
++	}
+ 	return avro_write_str(out, "}");
+ }
+ 
+@@ -1784,7 +1868,16 @@ static int write_map(avro_writer_t out, const struct avro_map_schema_t *map,
+ 		     const char *parent_namespace)
+ {
+ 	int rval;
+-	check(rval, avro_write_str(out, "{\"type\":\"map\",\"values\":"));
++	check(rval, avro_write_str(out, "{\"type\":\"map\""));
++	if (map->key_id != INT32_MAX) {
++		check(rval, avro_write_str(out, ",\"key-id\":"));
++		check(rval, avro_write_int(out, map->key_id));
++	}
++	if (map->value_id != INT32_MAX) {
++		check(rval, avro_write_str(out, ",\"value-id\":"));
++		check(rval, avro_write_int(out, map->value_id));
++	}
++	check(rval, avro_write_str(out, ",\"values\":"));
+ 	check(rval, avro_schema_to_json2(map->values, out, parent_namespace));
+ 	return avro_write_str(out, "}");
+ }
+@@ -1792,7 +1885,12 @@ static int write_array(avro_writer_t out, const struct avro_array_schema_t *arra
+ 		       const char *parent_namespace)
+ {
+ 	int rval;
+-	check(rval, avro_write_str(out, "{\"type\":\"array\",\"items\":"));
++	check(rval, avro_write_str(out, "{\"type\":\"array\""));
++	if (array->element_id != INT32_MAX) {
++		check(rval, avro_write_str(out, ",\"element-id\":"));
++		check(rval, avro_write_int(out, array->element_id));
++	}
++	check(rval, avro_write_str(out, ",\"items\":"));
+ 	check(rval, avro_schema_to_json2(array->items, out, parent_namespace));
+ 	return avro_write_str(out, "}");
+ }
 diff --git a/lang/c/src/schema.h b/lang/c/src/schema.h
 index 3c99ee630..303dd8d2a 100644
 --- a/lang/c/src/schema.h
