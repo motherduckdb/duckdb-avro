@@ -88,7 +88,7 @@ static AvroType TransformSchema(avro_schema_t &avro_schema, unordered_set<string
 		child_type.field_id = element_id;
 		child_list_t<AvroType> list_children;
 		list_children.push_back(std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
-		auto res = AvroType(AVRO_ARRAY, LogicalTypeId::LIST, std::move(list_children));
+		return AvroType(AVRO_ARRAY, LogicalTypeId::LIST, std::move(list_children));
 	}
 	case AVRO_MAP: {
 		auto child_schema = avro_schema_map_values(avro_schema);
@@ -266,13 +266,17 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type, Vect
 			throw InvalidInputException(avro_strerror());
 		}
 
-		D_ASSERT(avro_type.children.size() == 1);
+		D_ASSERT(avro_type.children.size() == 2);
 		auto child_offset = ListVector::GetListSize(target);
 		ListVector::Reserve(target, child_offset + entry_count);
 
 		auto &key_vector = MapVector::GetKeys(target);
 		auto &value_vector = MapVector::GetValues(target);
 
+		auto &key_type =  avro_type.children[0].second;
+		//! Unused, always VARCHAR
+		(void)key_type;
+		auto &value_type =  avro_type.children[1].second;
 		D_ASSERT(key_vector.GetType().id() == LogicalTypeId::VARCHAR);
 		auto string_ptr = FlatVector::GetData<string_t>(key_vector);
 		for (idx_t entry_idx = 0; entry_idx < entry_count; entry_idx++) {
@@ -283,7 +287,7 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type, Vect
 			}
 			D_ASSERT(map_key);
 			string_ptr[child_offset + entry_idx] = StringVector::AddString(key_vector, map_key);
-			TransformValue(&child_value, avro_type.children[0].second, value_vector, child_offset + entry_idx);
+			TransformValue(&child_value, value_type, value_vector, child_offset + entry_idx);
 		}
 		auto list_vector = ListVector::GetData(target);
 
