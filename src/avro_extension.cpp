@@ -12,6 +12,7 @@
 #include "duckdb/common/multi_file/multi_file_reader.hpp"
 #include "avro_multi_file_info.hpp"
 #include "duckdb/common/multi_file/multi_file_function.hpp"
+#include "avro_copy.hpp"
 
 #include <avro.h>
 
@@ -22,6 +23,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 	auto table_function = MultiFileFunction<AvroMultiFileInfo>("read_avro");
 	table_function.projection_pushdown = true;
 	ExtensionUtil::RegisterFunction(instance, MultiFileReader::CreateFunctionSet(table_function));
+	ExtensionUtil::RegisterFunction(instance, AvroCopyFunction::Create());
 }
 
 void AvroExtension::Load(DuckDB &db) {
