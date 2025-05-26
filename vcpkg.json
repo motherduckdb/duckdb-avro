@@ -3,6 +3,17 @@
 		"avro-c"
 	],
 	"vcpkg-configuration": {
+		"registries": [
+			{
+				"kind": "git",
+				"baseline": "165cd2c1c7be245983c3d27de332de0ad0b583ec",
+				"repository": "https://github.com/Tishj/vcpkg-duckdb-ports",
+				"packages": [
+					"vcpkg-cmake",
+					"avro-c"
+				]
+			}
+		],
 		"overlay-ports": [
 			"./vcpkg_ports"
 		]
