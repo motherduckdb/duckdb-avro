@@ -1,0 +1,56 @@
+diff --git a/lang/c/src/avro/io.h b/lang/c/src/avro/io.h
+index ffbb68dc5..5c103816e 100644
+--- a/lang/c/src/avro/io.h
++++ b/lang/c/src/avro/io.h
+@@ -109,6 +109,7 @@ int avro_file_writer_create_with_codec(const char *path,
+ int avro_file_writer_create_with_codec_fp(FILE *fp, const char *path, int should_close,
+ 				avro_schema_t schema, avro_file_writer_t * writer,
+ 				const char *codec, size_t block_size);
++int avro_file_writer_create_from_writer(avro_writer_t writer_in, avro_schema_t schema, avro_file_writer_t * writer);
+ int avro_file_writer_open(const char *path, avro_file_writer_t * writer);
+ int avro_file_writer_open_bs(const char *path, avro_file_writer_t * writer, size_t block_size);
+ int avro_file_reader(const char *path, avro_file_reader_t * reader);
+diff --git a/lang/c/src/datafile.c b/lang/c/src/datafile.c
+index c9d4dfeb6..90aa77618 100644
+--- a/lang/c/src/datafile.c
++++ b/lang/c/src/datafile.c
+@@ -238,6 +238,39 @@ int avro_file_writer_create_with_codec_fp(FILE *fp, const char *path, int should
+ 	return 0;
+ }
+ 
++int avro_file_writer_create_from_writer(avro_writer_t writer_in, avro_schema_t schema, avro_file_writer_t * writer)
++{
++	avro_file_writer_t w;
++	int rval;
++	check_param(EINVAL, is_avro_schema(schema), "schema");
++	check_param(EINVAL, writer, "writer");
++
++	size_t block_size = DEFAULT_BLOCK_SIZE;
++
++	w = (avro_file_writer_t) avro_new(struct avro_file_writer_t_);
++	if (!w) {
++		avro_set_error("Cannot allocate new file writer");
++		return ENOMEM;
++	}
++	w->codec = (avro_codec_t) avro_new(struct avro_codec_t_);
++	if (!w->codec) {
++		avro_set_error("Cannot allocate new codec");
++		avro_freet(struct avro_file_writer_t_, w);
++		return ENOMEM;
++	}
++	rval = avro_codec(w->codec, "null");
++	if (rval) {
++		avro_codec_reset(w->codec);
++		avro_freet(struct avro_codec_t_, w->codec);
++		avro_freet(struct avro_file_writer_t_, w);
++		return rval;
++	}
++	w->writer = writer_in;
++	*writer = w;
++
++	return 0;
++}
++
+ static int file_read_header(avro_reader_t reader,
+ 			    avro_schema_t * writers_schema, avro_codec_t codec,
+ 			    char *sync, int synclen)

@@ -74,17 +74,21 @@ static unique_ptr<LocalFunctionData> WriteAvroInitializeLocal(ExecutionContext &
 	return res;
 }
 
-static unique_ptr<GlobalFunctionData> WriteAvroInitializeGlobal(ClientContext &context, FunctionData &bind_data, const string &file_path) {
+static unique_ptr<GlobalFunctionData> WriteAvroInitializeGlobal(ClientContext &context, FunctionData &bind_data_p, const string &file_path) {
 	auto res = make_uniq<WriteAvroGlobalState>(FileSystem::GetFileSystem(context), file_path);
 
+	auto &bind_data = bind_data_p.Cast<WriteAvroBindData>();
+	bind_data.global_state = res.get();
 	//! Create the file to write, this already creates the Avro header
 	// avro_file_writer_create_with_codec();
 
 	return res;
 }
 
-static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data, GlobalFunctionData &gstate, LocalFunctionData &lstate, DataChunk &input) {
+static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, GlobalFunctionData &gstate, LocalFunctionData &lstate, DataChunk &input) {
 
+	(void)gstate;
+	auto &bind_data = bind_data_p.Cast<WriteAvroBindData>();
 	//! This finalizes a Data Block (writes the record count and the 'sync' footer for the block)
 	// avro_file_writer_flush
 
