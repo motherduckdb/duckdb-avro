@@ -99,13 +99,13 @@ shared_ptr<BaseFileReader> AvroMultiFileInfo::CreateReader(ClientContext &contex
 shared_ptr<BaseFileReader> AvroMultiFileInfo::CreateReader(ClientContext &context, GlobalTableFunctionState &gstate_p,
                                                            const OpenFileInfo &file, idx_t file_idx,
                                                            const MultiFileBindData &bind_data) {
-	return make_shared_ptr<AvroReader>(context, file.path);
+	return make_shared_ptr<AvroReader>(context, file);
 }
 
 shared_ptr<BaseFileReader> AvroMultiFileInfo::CreateReader(ClientContext &context, const OpenFileInfo &file,
                                                            BaseFileReaderOptions &options,
                                                            const MultiFileOptions &file_options) {
-	return make_shared_ptr<AvroReader>(context, file.path);
+	return make_shared_ptr<AvroReader>(context, file);
 }
 
 bool AvroReader::TryInitializeScan(ClientContext &context, GlobalTableFunctionState &gstate_p,

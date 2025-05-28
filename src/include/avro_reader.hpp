@@ -8,7 +8,7 @@ namespace duckdb {
 
 class AvroReader : public BaseFileReader {
 public:
-	AvroReader(ClientContext &context, const string filename_p);
+	AvroReader(ClientContext &context, const OpenFileInfo file);
 
 	~AvroReader() {
 		avro_value_decref(&value);
