@@ -103,14 +103,10 @@ static AvroType TransformSchema(avro_schema_t &avro_schema, unordered_set<string
 	}
 }
 
-AvroReader::AvroReader(ClientContext &context, string filename_p) : BaseFileReader(std::move(filename_p)) {
+AvroReader::AvroReader(ClientContext &context, OpenFileInfo file) : BaseFileReader(file) {
 	auto caching_file_system = CachingFileSystem::Get(context);
-	auto &fs = FileSystem::GetFileSystem(context);
-	if (!fs.FileExists(this->file.path)) {
-		throw InvalidInputException("Avro file %s not found", this->file.path);
-	}
 
-	auto caching_file_handle = caching_file_system.OpenFile(this->file.path, FileOpenFlags::FILE_FLAGS_READ);
+	auto caching_file_handle = caching_file_system.OpenFile(this->file, FileOpenFlags::FILE_FLAGS_READ);
 	allocated_data = Allocator::Get(context).Allocate(caching_file_handle->GetFileSize());
 	auto total_size = allocated_data.GetSize();
 	auto data = allocated_data.get();
