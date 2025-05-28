@@ -104,23 +104,22 @@ static AvroType TransformSchema(avro_schema_t &avro_schema, unordered_set<string
 }
 
 AvroReader::AvroReader(ClientContext &context, string filename_p) : BaseFileReader(std::move(filename_p)) {
-	auto caching_file_system = CachingFileSystem::Get(context);
 	auto &fs = FileSystem::GetFileSystem(context);
 	if (!fs.FileExists(this->file.path)) {
 		throw InvalidInputException("Avro file %s not found", this->file.path);
 	}
 
-	auto caching_file_handle = caching_file_system.OpenFile(this->file.path, FileOpenFlags::FILE_FLAGS_READ);
+	auto caching_file_handle = fs.OpenFile(this->file.path, FileOpenFlags::FILE_FLAGS_READ);
 	allocated_data = Allocator::Get(context).Allocate(caching_file_handle->GetFileSize());
 	auto total_size = allocated_data.GetSize();
 	auto data = allocated_data.get();
 
-	auto buf_handle = caching_file_handle->Read(data, total_size);
-	auto buffer_data = buf_handle.Ptr();
+	int64_t num_read = caching_file_handle->Read(data, total_size);
 
-	D_ASSERT(buf_handle.IsValid());
-	D_ASSERT(buffer_data == data);
-	auto avro_reader = avro_reader_memory(const_char_ptr_cast(buffer_data), total_size);
+	if (num_read < total_size) {
+		throw IOException("Failed to fully read file '%s'", file.path);
+	}
+	auto avro_reader = avro_reader_memory(const_char_ptr_cast(data), num_read);
 
 	if (avro_reader_reader(avro_reader, &reader)) {
 		throw InvalidInputException(avro_strerror());
