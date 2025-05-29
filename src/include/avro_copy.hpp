@@ -28,18 +28,31 @@ public:
 	}
 
 public:
-	//! TODO: store any data immutable data created during bind
+	vector<string> names;
+	vector<LogicalType> types;
+
 	optional_ptr<GlobalFunctionData> global_state;
 	//! The schema of the file to write
-	avro_schema_t schema;
+	avro_schema_t schema = nullptr;
+};
+
+struct AvroValueMapping {
+public:
+	AvroValueMapping() {}
+public:
+	avro_value_t target;
+	vector<AvroValueMapping> child_mappings;
 };
 
 struct WriteAvroLocalState : public LocalFunctionData {
 public:
-	WriteAvroLocalState() {}
+	WriteAvroLocalState(FunctionData &bind_data_p);
+	virtual ~WriteAvroLocalState();
 public:
-	//! The interface through which new avro values are created
-	avro_value_iface_t interface;
+	//! Avro value representing a row of the schema
+	avro_value_t value;
+	//! Mapping from Vector index to avro_value
+	vector<AvroValueMapping> mappings;
 };
 
 struct WriteAvroGlobalState : public GlobalFunctionData {
@@ -47,9 +60,9 @@ public:
 	static constexpr idx_t BUFFER_SIZE = STANDARD_VECTOR_SIZE;
 public:
 	WriteAvroGlobalState(ClientContext &context, FunctionData &bind_data_p, FileSystem &fs, const string &file_path);
+	virtual ~WriteAvroGlobalState();
 public:
-	//! Write a finished data block to the file
-	void WriteDataBlock(const_data_ptr_t data, idx_t size) {
+	void WriteData(const_data_ptr_t data, idx_t size) {
 		lock_guard<mutex> flock(lock);
 		handle->Write((void *)data, size);
 	}
@@ -70,8 +83,8 @@ public:
 	//! The writer for the file
 	avro_writer_t writer;
 	avro_file_writer_t file_writer;
-	//! The avro schema created from the input
-	avro_schema_t avro_schema;
+	//! The interface through which new avro values are created
+	avro_value_iface_t *interface = nullptr;
 };
 
 } // namespace duckdb
