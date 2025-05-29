@@ -258,7 +258,7 @@ static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx,
 	switch (type.id()) {
 		case LogicalTypeId::VARCHAR: {
 			auto str = val.GetValueUnsafe<string_t>();
-			avro_value_set_string_len(target, str.GetData(), str.GetSize());
+			avro_value_set_string_len(target, str.GetData(), str.GetSize() + 1);
 			break;
 		}
 		case LogicalTypeId::BLOB: {

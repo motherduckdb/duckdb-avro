@@ -51,7 +51,7 @@ index c9d4dfeb6..ce7f41740 100644
  	if (meta_iface == NULL) {
  		return EILSEQ;
 diff --git a/lang/c/src/schema.c b/lang/c/src/schema.c
-index 7b389002b..cffeea986 100644
+index 7b389002b..48d14c8db 100644
 --- a/lang/c/src/schema.c
 +++ b/lang/c/src/schema.c
 @@ -182,6 +182,9 @@ static void avro_schema_free(avro_schema_t schema)
@@ -323,7 +323,7 @@ index 7b389002b..cffeea986 100644
  	check(rval, avro_write_str(out, "\",\"type\":"));
  	check(rval, avro_schema_to_json2(field->type, out, parent_namespace));
 +	if (field->field_id != INT32_MAX) {
-+		check(rval, avro_write_str(out, "\",\"field-id\":"));
++		check(rval, avro_write_str(out, ",\"field-id\":"));
 +		check(rval, avro_write_int(out, field->field_id));
 +	}
  	return avro_write_str(out, "}");
