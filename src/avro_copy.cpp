@@ -48,7 +48,7 @@ static yyjson_mut_val *CreateJSONType(yyjson_mut_doc *doc, const string &name, c
 	auto object = yyjson_mut_obj(doc);
 
 	if (!name.empty()) {
-		yyjson_mut_obj_add_str(doc, object, "name", name.c_str());
+		yyjson_mut_obj_add_strcpy(doc, object, "name", name.c_str());
 	}
 
 	//! TODO: actually get the field ids
@@ -65,18 +65,25 @@ static yyjson_mut_val *CreateJSONType(yyjson_mut_doc *doc, const string &name, c
 			}
 			break;
 		}
+		case LogicalTypeId::MAP:
 		case LogicalTypeId::LIST: {
 			//! NOTE: This is seemingly a work-around of a limitation in either the Avro spec, or the avro-c implementation
 			//! 'array' can not be directly part of a struct field
 			auto union_type = yyjson_mut_obj_add_arr(doc, object, "type");
 			//! First item of the union is null, to indicate that the field is nullable
-			yyjson_mut_arr_add_str(doc, union_type, "null");
+			yyjson_mut_arr_add_strcpy(doc, union_type, "null");
 
-			yyjson_mut_obj_add_int(doc, object, "element-id", field_id);
 
 			auto list_object = yyjson_mut_obj(doc);
 
-			yyjson_mut_obj_add_str(doc, list_object, "type", "array");
+			if (type.id() == LogicalTypeId::LIST) {
+				yyjson_mut_obj_add_int(doc, list_object, "element-id", field_id);
+			} else {
+				D_ASSERT(type.id() == LogicalTypeId::MAP);
+				yyjson_mut_obj_add_strcpy(doc, list_object, "logicalType", "map");
+			}
+
+			yyjson_mut_obj_add_strcpy(doc, list_object, "type", "array");
 			auto &list_child = ListType::GetChildType(type);
 			if (list_child.IsNested()) {
 				yyjson_mut_obj_add_val(doc, list_object, "items", CreateJSONType(doc, "element", list_child, &type));
@@ -85,12 +92,6 @@ static yyjson_mut_val *CreateJSONType(yyjson_mut_doc *doc, const string &name, c
 			}
 
 			yyjson_mut_arr_add_val(union_type, list_object);
-			break;
-		}
-		case LogicalTypeId::MAP: {
-			auto &child_type = ListType::GetChildType(type);
-			yyjson_mut_obj_add_strcpy(doc, object, "logicalType", "map");
-			yyjson_mut_obj_add_val(doc, object, "items", CreateJSONType(doc, "key_value", child_type, &type));
 			break;
 		}
 		default:
@@ -255,10 +256,16 @@ static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx,
 static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx, optional_ptr<AvroValueMapping> mapping_p, optional_ptr<const LogicalType> parent) {
 	auto &type = val.type();
 
+	//! FIXME: add tests for nulls
+	if (val.IsNull()) {
+		avro_value_set_null(target);
+		return;
+	}
+
 	switch (type.id()) {
-		case LogicalTypeId::VARCHAR: {
-			auto str = val.GetValueUnsafe<string_t>();
-			avro_value_set_string_len(target, str.GetData(), str.GetSize() + 1);
+		case LogicalTypeId::BOOLEAN: {
+			auto boolean = val.GetValueUnsafe<bool>();
+			avro_value_set_boolean(target, boolean);
 			break;
 		}
 		case LogicalTypeId::BLOB: {
@@ -266,9 +273,14 @@ static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx,
 			avro_value_set_bytes(target, (void *)str.GetData(), str.GetSize());
 			break;
 		}
-		case LogicalTypeId::BIGINT: {
-			auto bigint = val.GetValueUnsafe<int64_t>();
-			avro_value_set_long(target, bigint);
+		case LogicalTypeId::DOUBLE: {
+			auto value = val.GetValueUnsafe<double>();
+			avro_value_set_double(target, value);
+			break;
+		}
+		case LogicalTypeId::FLOAT: {
+			auto value = val.GetValueUnsafe<float>();
+			avro_value_set_float(target, value);
 			break;
 		}
 		case LogicalTypeId::INTEGER: {
@@ -276,10 +288,19 @@ static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx,
 			avro_value_set_int(target, integer);
 			break;
 		}
-		case LogicalTypeId::BOOLEAN: {
-			auto boolean = val.GetValueUnsafe<bool>();
-			avro_value_set_boolean(target, boolean);
+		case LogicalTypeId::BIGINT: {
+			auto bigint = val.GetValueUnsafe<int64_t>();
+			avro_value_set_long(target, bigint);
 			break;
+		}
+		case LogicalTypeId::VARCHAR: {
+			auto str = val.GetValueUnsafe<string_t>();
+			avro_value_set_string_len(target, str.GetData(), str.GetSize() + 1);
+			break;
+		}
+		case LogicalTypeId::ENUM: {
+			//! TODO: add support for ENUM
+			throw NotImplementedException("Can't convert ENUM Value (%s) to Avro yet", val.ToString());
 		}
 		case LogicalTypeId::LIST: {
 			AvroValueMapping new_mapping;
