@@ -88,6 +88,10 @@ static AvroType TransformSchema(avro_schema_t &avro_schema, unordered_set<string
 		child_type.field_id = element_id;
 		child_list_t<AvroType> list_children;
 		list_children.push_back(std::pair<std::string, AvroType>("list_entry", std::move(child_type)));
+		bool is_map = avro_schema_array_is_map(avro_schema);
+		if (is_map) {
+			return AvroType(AVRO_ARRAY, LogicalTypeId::MAP, std::move(list_children));
+		}
 		return AvroType(AVRO_ARRAY, LogicalTypeId::LIST, std::move(list_children));
 	}
 	case AVRO_MAP: {
@@ -260,43 +264,6 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type, Vect
 		break;
 	}
 
-	case LogicalTypeId::MAP: {
-		size_t entry_count;
-		if (avro_value_get_size(avro_val, &entry_count)) {
-			throw InvalidInputException(avro_strerror());
-		}
-
-		D_ASSERT(avro_type.children.size() == 2);
-		auto child_offset = ListVector::GetListSize(target);
-		ListVector::Reserve(target, child_offset + entry_count);
-
-		auto &key_vector = MapVector::GetKeys(target);
-		auto &value_vector = MapVector::GetValues(target);
-
-		auto &key_type =  avro_type.children[0].second;
-		//! Unused, always VARCHAR
-		(void)key_type;
-		auto &value_type =  avro_type.children[1].second;
-		D_ASSERT(key_vector.GetType().id() == LogicalTypeId::VARCHAR);
-		auto string_ptr = FlatVector::GetData<string_t>(key_vector);
-		for (idx_t entry_idx = 0; entry_idx < entry_count; entry_idx++) {
-			avro_value child_value;
-			const char *map_key;
-			if (avro_value_get_by_index(avro_val, entry_idx, &child_value, &map_key)) {
-				throw InvalidInputException(avro_strerror());
-			}
-			D_ASSERT(map_key);
-			string_ptr[child_offset + entry_idx] = StringVector::AddString(key_vector, map_key);
-			TransformValue(&child_value, value_type, value_vector, child_offset + entry_idx);
-		}
-		auto list_vector = ListVector::GetData(target);
-
-		list_vector[out_idx].offset = child_offset;
-		list_vector[out_idx].length = entry_count;
-		ListVector::SetListSize(target, child_offset + entry_count);
-		break;
-	}
-
 	case LogicalTypeId::UNION: {
 		int discriminant;
 		avro_value union_value;
@@ -360,28 +327,51 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type, Vect
 		break;
 	}
 
+	case LogicalTypeId::MAP:
 	case LogicalTypeId::LIST: {
 		size_t list_len;
-
 		if (avro_value_get_size(avro_val, &list_len)) {
 			throw InvalidInputException(avro_strerror());
 		}
-		auto &child_vector = ListVector::GetEntry(target);
+
 		auto child_offset = ListVector::GetListSize(target);
 		ListVector::Reserve(target, child_offset + list_len);
 
-		for (idx_t child_idx = 0; child_idx < list_len; child_idx++) {
-			avro_value_t child_value;
-			if (avro_value_get_by_index(avro_val, child_idx, &child_value, nullptr)) {
-				throw InvalidInputException(avro_strerror());
+		if (avro_type.avro_type == AVRO_ARRAY) {
+			auto &child_vector = ListVector::GetEntry(target);
+
+			for (idx_t child_idx = 0; child_idx < list_len; child_idx++) {
+				avro_value_t child_value;
+				if (avro_value_get_by_index(avro_val, child_idx, &child_value, nullptr)) {
+					throw InvalidInputException(avro_strerror());
+				}
+				TransformValue(&child_value, avro_type.children[0].second, child_vector, child_offset + child_idx);
 			}
-			TransformValue(&child_value, avro_type.children[0].second, child_vector, child_offset + child_idx);
+		} else {
+			auto &key_vector = MapVector::GetKeys(target);
+			auto &value_vector = MapVector::GetValues(target);
+
+			auto &key_type =  avro_type.children[0].second;
+			//! Unused, always VARCHAR
+			(void)key_type;
+			auto &value_type =  avro_type.children[1].second;
+			D_ASSERT(key_vector.GetType().id() == LogicalTypeId::VARCHAR);
+			auto string_ptr = FlatVector::GetData<string_t>(key_vector);
+			for (idx_t entry_idx = 0; entry_idx < list_len; entry_idx++) {
+				avro_value child_value;
+				const char *map_key;
+				if (avro_value_get_by_index(avro_val, entry_idx, &child_value, &map_key)) {
+					throw InvalidInputException(avro_strerror());
+				}
+				D_ASSERT(map_key);
+				string_ptr[child_offset + entry_idx] = StringVector::AddString(key_vector, map_key);
+				TransformValue(&child_value, value_type, value_vector, child_offset + entry_idx);
+			}
 		}
 		auto list_vector_data = ListVector::GetData(target);
 		list_vector_data[out_idx].length = list_len;
 		list_vector_data[out_idx].offset = child_offset;
 		ListVector::SetListSize(target, child_offset + list_len);
-
 		break;
 	}
 

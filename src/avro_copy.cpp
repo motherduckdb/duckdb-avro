@@ -169,24 +169,84 @@ WriteAvroBindData::~WriteAvroBindData() {
 	avro_schema_decref(schema);
 }
 
+static void VerifyType(avro_value_t *val, const LogicalType &type) {
+	#ifdef DEBUG
+	auto avro_type = avro_value_get_type(val);
+	switch (type.id()) {
+		case LogicalType::SQLNULL: {
+			D_ASSERT(avro_type == AVRO_NULL);
+			break;
+		}
+		case LogicalType::BOOLEAN: {
+			D_ASSERT(avro_type == AVRO_BOOLEAN);
+			break;
+		}
+		case LogicalType::INTEGER: {
+			D_ASSERT(avro_type == AVRO_INT32);
+			break;
+		}
+		case LogicalType::BIGINT: {
+			D_ASSERT(avro_type == AVRO_INT64);
+			break;
+		}
+		case LogicalType::FLOAT: {
+			D_ASSERT(avro_type == AVRO_FLOAT);
+			break;
+		}
+		case LogicalType::DOUBLE: {
+			D_ASSERT(avro_type == AVRO_DOUBLE);
+			break;
+		}
+		case LogicalType::BLOB: {
+			D_ASSERT(avro_type == AVRO_BYTES);
+			break;
+		}
+		case LogicalType::VARCHAR: {
+			D_ASSERT(avro_type == AVRO_STRING);
+			break;
+		}
+		case LogicalTypeId::UNION: {
+			D_ASSERT(avro_type == AVRO_UNION);
+			break;
+		}
+		case LogicalTypeId::STRUCT: {
+			D_ASSERT(avro_type == AVRO_RECORD);
+			break;
+		}
+		case LogicalTypeId::ENUM: {
+			D_ASSERT(avro_type == AVRO_ENUM);
+			break;
+		}
+		case LogicalTypeId::LIST: {
+			D_ASSERT(avro_type == AVRO_ARRAY);
+			break;
+		}
+		case LogicalTypeId::MAP: {
+			D_ASSERT(avro_type == AVRO_ARRAY);
+			break;
+		}
+		default:
+			throw NotImplementedException("Can't verify for type '%s'", type.ToString());
+	};
+	#endif
+}
+
 //! Get the avro value from the current source for the given index
 AvroValueMapping CreateMapping(avro_value_t *source, idx_t index, const LogicalType &type) {
 	AvroValueMapping result;
+	auto source_avro_type = avro_value_get_type(source);
 
 	const char *unused_name;
 	if (avro_value_get_by_index(source, index, &result.target, &unused_name)) {
 		throw InvalidInputException(avro_strerror());
 	}
 
-	switch (type.id()) {
-		case LogicalTypeId::MAP:
-		case LogicalTypeId::LIST: {
-			auto union_mapping = result.target;
-			avro_value_set_branch(&union_mapping, 1, &result.target);
-		}
-		default:
-			break;
+	if (type.IsNested()) {
+		D_ASSERT(avro_value_get_type(&result.target) == AVRO_UNION);
+		auto union_mapping = result.target;
+		avro_value_set_branch(&union_mapping, 1, &result.target);
 	}
+	VerifyType(&result.target, type);
 	return result;
 }
 
@@ -198,6 +258,7 @@ void PopulateMappingChildren(AvroValueMapping &result, const LogicalType &type) 
 	switch (type.id()) {
 		case LogicalTypeId::STRUCT: {
 			auto &struct_children = StructType::GetChildTypes(type);
+
 			for (idx_t i = 0; i < struct_children.size(); i++) {
 				auto &child_type = struct_children[i].second;
 
@@ -206,12 +267,6 @@ void PopulateMappingChildren(AvroValueMapping &result, const LogicalType &type) 
 
 				result.child_mappings.push_back(child);
 			}
-			break;
-		}
-		case LogicalTypeId::MAP:
-		case LogicalTypeId::LIST: {
-			auto union_mapping = result.target;
-			avro_value_set_branch(&union_mapping, 1, &result.target);
 			break;
 		}
 		default:
@@ -325,6 +380,7 @@ static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx,
 			//! TODO: add support for ENUM
 			throw NotImplementedException("Can't convert ENUM Value (%s) to Avro yet", val.ToString());
 		}
+		case LogicalTypeId::MAP:
 		case LogicalTypeId::LIST: {
 			AvroValueMapping new_mapping;
 			reference<AvroValueMapping> mapping(new_mapping);
@@ -356,6 +412,9 @@ static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx,
 				mapping = *mapping_p;
 			} else {
 				new_mapping.target = *target;
+				D_ASSERT(avro_value_get_type(&new_mapping.target) == AVRO_UNION);
+				auto union_mapping = new_mapping.target;
+				avro_value_set_branch(&union_mapping, 1, &new_mapping.target);
 				PopulateMappingChildren(new_mapping, type);
 			}
 

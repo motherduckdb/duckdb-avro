@@ -38,7 +38,8 @@ public:
 		vector<MultiFileColumnDefinition> children;
 
 		LogicalType duckdb_type;
-		switch (avro_type.duckdb_type.id()) {
+		auto id = avro_type.duckdb_type.id();
+		switch (id) {
 		case LogicalTypeId::STRUCT: {
 			child_list_t<LogicalType> type_children;
 			for (auto &child : avro_type.children) {
@@ -50,22 +51,30 @@ public:
 			duckdb_type = LogicalType::STRUCT(std::move(type_children));
 			break;
 		}
+		case LogicalTypeId::MAP:
 		case LogicalTypeId::LIST: {
-			auto element = TransformAvroType("element", avro_type.children[0].second);
-			duckdb_type = LogicalType::LIST(element.type);
-			children.push_back(std::move(element));
-			break;
-		}
-		case LogicalTypeId::MAP: {
-			child_list_t<LogicalType> type_children;
-			auto key = TransformAvroType("key", avro_type.children[0].second);
-			auto value = TransformAvroType("value", avro_type.children[1].second);
+			if (avro_type.avro_type == AVRO_ARRAY) {
+				auto element = TransformAvroType("element", avro_type.children[0].second);
+				if (id == LogicalTypeId::MAP) {
+					auto &key_type = element.children[0].type;
+					auto &value_type = element.children[1].type;
+					duckdb_type = LogicalType::MAP(key_type, value_type);
+					children = std::move(element.children);
+				} else {
+					duckdb_type = LogicalType::LIST(element.type);
+					children.push_back(std::move(element));
+				}
+			} else {
+				child_list_t<LogicalType> type_children;
+				auto key = TransformAvroType("key", avro_type.children[0].second);
+				auto value = TransformAvroType("value", avro_type.children[1].second);
 
-			type_children.emplace_back(key.name, key.type);
-			type_children.emplace_back(value.name, value.type);
-			duckdb_type = LogicalType::MAP(LogicalType::STRUCT(std::move(type_children)));
-			children.push_back(std::move(key));
-			children.push_back(std::move(value));
+				type_children.emplace_back(key.name, key.type);
+				type_children.emplace_back(value.name, value.type);
+				duckdb_type = LogicalType::MAP(LogicalType::STRUCT(std::move(type_children)));
+				children.push_back(std::move(key));
+				children.push_back(std::move(value));
+			}
 			break;
 		}
 		case LogicalTypeId::UNION: {
