@@ -44,16 +44,16 @@ static string ConvertTypeToAvro(const LogicalType &type) {
 	//! FIXME: we don't have support for 'FIXED' currently (a fixed size blob)
 }
 
-static yyjson_mut_val *CreateJSONType(yyjson_mut_doc *doc, const string &name, const LogicalType &type, optional_ptr<const LogicalType> parent_type) {
-	auto object = yyjson_mut_obj(doc);
+static yyjson_mut_val *CreateJSONType(yyjson_mut_doc *doc, const string &name, const LogicalType &type, bool struct_field = false);
 
-	if (!name.empty()) {
-		yyjson_mut_obj_add_strcpy(doc, object, "name", name.c_str());
-	}
-
+static yyjson_mut_val *CreateNestedType(yyjson_mut_doc *doc, const string &name, const LogicalType &type) {
 	//! TODO: actually get the field ids
 	int32_t field_id = 42;
 
+	D_ASSERT(type.IsNested());
+	auto object = yyjson_mut_obj(doc);
+	yyjson_mut_obj_add_strcpy(doc, object, "type", ConvertTypeToAvro(type).c_str());
+	yyjson_mut_obj_add_strcpy(doc, object, "name", name.c_str());
 	switch (type.id()) {
 		case LogicalTypeId::STRUCT: {
 			auto &struct_children = StructType::GetChildTypes(type);
@@ -61,49 +61,71 @@ static yyjson_mut_val *CreateJSONType(yyjson_mut_doc *doc, const string &name, c
 			for (auto &it : struct_children) {
 				auto &child_name = it.first;
 				auto &child_type = it.second;
-				yyjson_mut_arr_add_val(fields, CreateJSONType(doc, child_name, child_type, &type));
+				yyjson_mut_arr_add_val(fields, CreateJSONType(doc, child_name, child_type, true));
 			}
 			break;
 		}
 		case LogicalTypeId::MAP:
 		case LogicalTypeId::LIST: {
-			//! NOTE: This is seemingly a work-around of a limitation in either the Avro spec, or the avro-c implementation
-			//! 'array' can not be directly part of a struct field
-			auto union_type = yyjson_mut_obj_add_arr(doc, object, "type");
-			//! First item of the union is null, to indicate that the field is nullable
-			yyjson_mut_arr_add_strcpy(doc, union_type, "null");
-
-
-			auto list_object = yyjson_mut_obj(doc);
-
 			if (type.id() == LogicalTypeId::LIST) {
-				yyjson_mut_obj_add_int(doc, list_object, "element-id", field_id);
+				yyjson_mut_obj_add_int(doc, object, "element-id", field_id);
 			} else {
 				D_ASSERT(type.id() == LogicalTypeId::MAP);
-				yyjson_mut_obj_add_strcpy(doc, list_object, "logicalType", "map");
+				yyjson_mut_obj_add_strcpy(doc, object, "logicalType", "map");
 			}
 
-			yyjson_mut_obj_add_strcpy(doc, list_object, "type", "array");
 			auto &list_child = ListType::GetChildType(type);
 			if (list_child.IsNested()) {
-				yyjson_mut_obj_add_val(doc, list_object, "items", CreateJSONType(doc, "element", list_child, &type));
+				auto union_type = yyjson_mut_obj_add_arr(doc, object, "items");
+				yyjson_mut_arr_add_strcpy(doc, union_type, "null");
+				yyjson_mut_arr_add_val(union_type, CreateNestedType(doc, "element", list_child));
 			} else {
-				yyjson_mut_obj_add_strcpy(doc, list_object, "items", ConvertTypeToAvro(list_child).c_str());
+				yyjson_mut_obj_add_strcpy(doc, object, "items", ConvertTypeToAvro(list_child).c_str());
 			}
-
-			yyjson_mut_arr_add_val(union_type, list_object);
 			break;
 		}
 		default:
-			break;
+			throw NotImplementedException("Can't convert nested type '%s' to Avro", type.ToString());
 	}
-
-	if (type.id() != LogicalTypeId::LIST && type.id() != LogicalTypeId::MAP) {
-		yyjson_mut_obj_add_strcpy(doc, object, "type", ConvertTypeToAvro(type).c_str());
-		yyjson_mut_obj_add_int(doc, object, "field-id", field_id);
-	}
-
 	return object;
+}
+
+static yyjson_mut_val *CreateJSONType(yyjson_mut_doc *doc, const string &name, const LogicalType &type, bool struct_field) {
+	//! TODO: actually get the field ids
+	int32_t field_id = 42;
+	if (!type.IsNested()) {
+		auto object = yyjson_mut_obj(doc);
+		yyjson_mut_obj_add_strcpy(doc, object, "type", ConvertTypeToAvro(type).c_str());
+		// {
+		//    "type": "bool"
+		//    < additional fields >
+		// }
+		yyjson_mut_obj_add_int(doc, object, "field-id", field_id);
+		if (struct_field) {
+			D_ASSERT(!name.empty());
+			yyjson_mut_obj_add_strcpy(doc, object, "name", name.c_str());
+		}
+		return object;
+	}
+	// {
+	//    "type": [
+	//        "null",
+	//        {
+	//            "type": "list" # or "record"
+	//            < additional fields >
+	//        }
+	//    ]
+	// }
+	auto object = CreateNestedType(doc, name, type);
+	auto wrapper = yyjson_mut_obj(doc);
+	auto union_type = yyjson_mut_obj_add_arr(doc, wrapper, "type");
+	if (struct_field) {
+		D_ASSERT(!name.empty());
+		yyjson_mut_obj_add_strcpy(doc, wrapper, "name", name.c_str());
+	}
+	yyjson_mut_arr_add_strcpy(doc, union_type, "null");
+	yyjson_mut_arr_add_val(union_type, object);
+	return wrapper;
 }
 
 static string CreateJSONSchema(const vector<string> &names, const vector<LogicalType> &types) {
@@ -120,7 +142,7 @@ static string CreateJSONSchema(const vector<string> &names, const vector<Logical
 	for (idx_t i = 0; i < names.size(); i++) {
 		auto &name = names[i];
 		auto &type = types[i];
-		yyjson_mut_arr_add_val(array, CreateJSONType(doc, name, type, nullptr));
+		yyjson_mut_arr_add_val(array, CreateJSONType(doc, name, type, true));
 	}
 
 	//! Write the result to a string
@@ -137,6 +159,7 @@ static string CreateJSONSchema(const vector<string> &names, const vector<Logical
 
 WriteAvroBindData::WriteAvroBindData(const vector<string> &names, const vector<LogicalType> &types) : names(names), types(types) {
 	auto json_schema = CreateJSONSchema(names, types);
+	Printer::Print(json_schema);
 	if (avro_schema_from_json_length(json_schema.c_str(), json_schema.size(), &schema)) {
 		throw InvalidInputException(avro_strerror());
 	}
