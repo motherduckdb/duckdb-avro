@@ -93,8 +93,9 @@ static yyjson_mut_val *CreateNestedType(yyjson_mut_doc *doc, const string &name,
 static yyjson_mut_val *CreateJSONType(yyjson_mut_doc *doc, const string &name, const LogicalType &type, bool struct_field) {
 	//! TODO: actually get the field ids
 	int32_t field_id = 42;
+	yyjson_mut_val *object;
 	if (!type.IsNested()) {
-		auto object = yyjson_mut_obj(doc);
+		object = yyjson_mut_obj(doc);
 		yyjson_mut_obj_add_strcpy(doc, object, "type", ConvertTypeToAvro(type).c_str());
 		// {
 		//    "type": "bool"
@@ -105,18 +106,10 @@ static yyjson_mut_val *CreateJSONType(yyjson_mut_doc *doc, const string &name, c
 			D_ASSERT(!name.empty());
 			yyjson_mut_obj_add_strcpy(doc, object, "name", name.c_str());
 		}
-		return object;
+	} else {
+		object = CreateNestedType(doc, name, type);
 	}
-	// {
-	//    "type": [
-	//        "null",
-	//        {
-	//            "type": "list" # or "record"
-	//            < additional fields >
-	//        }
-	//    ]
-	// }
-	auto object = CreateNestedType(doc, name, type);
+
 	auto wrapper = yyjson_mut_obj(doc);
 	auto union_type = yyjson_mut_obj_add_arr(doc, wrapper, "type");
 	if (struct_field) {
@@ -231,62 +224,10 @@ static void VerifyType(avro_value_t *val, const LogicalType &type) {
 	#endif
 }
 
-//! Get the avro value from the current source for the given index
-AvroValueMapping CreateMapping(avro_value_t *source, idx_t index, const LogicalType &type) {
-	AvroValueMapping result;
-	auto source_avro_type = avro_value_get_type(source);
-
-	const char *unused_name;
-	if (avro_value_get_by_index(source, index, &result.target, &unused_name)) {
-		throw InvalidInputException(avro_strerror());
-	}
-
-	if (type.IsNested()) {
-		D_ASSERT(avro_value_get_type(&result.target) == AVRO_UNION);
-		auto union_mapping = result.target;
-		avro_value_set_branch(&union_mapping, 1, &result.target);
-	}
-	VerifyType(&result.target, type);
-	return result;
-}
-
-//! Populate the child mappings for the provided mapping
-void PopulateMappingChildren(AvroValueMapping &result, const LogicalType &type) {
-	if (!type.IsNested()) {
-		return;
-	}
-	switch (type.id()) {
-		case LogicalTypeId::STRUCT: {
-			auto &struct_children = StructType::GetChildTypes(type);
-
-			for (idx_t i = 0; i < struct_children.size(); i++) {
-				auto &child_type = struct_children[i].second;
-
-				auto child = CreateMapping(&result.target, i, child_type);
-				PopulateMappingChildren(child, child_type);
-
-				result.child_mappings.push_back(child);
-			}
-			break;
-		}
-		default:
-			throw NotImplementedException("CreateMapping not implemented for type %s", type.ToString());
-	}
-}
-
 WriteAvroLocalState::WriteAvroLocalState(FunctionData &bind_data_p) {
 	auto &bind_data = bind_data_p.Cast<WriteAvroBindData>();
 	auto &global_state = bind_data.global_state->Cast<WriteAvroGlobalState>();
 	avro_generic_value_new(global_state.interface, &value);
-
-	auto &types = bind_data.types;
-	auto &names = bind_data.names;
-	for (idx_t i = 0; i < types.size(); i++) {
-		auto &type = types[i];
-
-		auto mapping = CreateMapping(&value, i, type);
-		mappings.push_back(mapping);
-	}
 }
 
 WriteAvroLocalState::~WriteAvroLocalState() {
@@ -329,16 +270,20 @@ static unique_ptr<GlobalFunctionData> WriteAvroInitializeGlobal(ClientContext &c
 	return res;
 }
 
-static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx, optional_ptr<AvroValueMapping> mapping_p, optional_ptr<const LogicalType> parent);
+static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx, optional_ptr<const LogicalType> parent);
 
-static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx, optional_ptr<AvroValueMapping> mapping_p, optional_ptr<const LogicalType> parent) {
+static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx, optional_ptr<const LogicalType> parent) {
 	auto &type = val.type();
 
 	//! FIXME: add tests for nulls
+	D_ASSERT(avro_value_get_type(target) == AVRO_UNION);
+	auto union_value = *target;
 	if (val.IsNull()) {
+		avro_value_set_branch(&union_value, 0, target);
 		avro_value_set_null(target);
 		return;
 	}
+	avro_value_set_branch(&union_value, 1, target);
 
 	switch (type.id()) {
 		case LogicalTypeId::BOOLEAN: {
@@ -382,15 +327,6 @@ static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx,
 		}
 		case LogicalTypeId::MAP:
 		case LogicalTypeId::LIST: {
-			AvroValueMapping new_mapping;
-			reference<AvroValueMapping> mapping(new_mapping);
-			if (mapping_p) {
-				mapping = *mapping_p;
-			} else {
-				new_mapping.target = *target;
-				PopulateMappingChildren(new_mapping, type);
-			}
-
 			auto &list_values = ListValue::GetChildren(val);
 			for (idx_t i = 0; i < list_values.size(); i++) {
 				auto &list_value = list_values[i];
@@ -401,29 +337,19 @@ static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx,
 					throw InvalidInputException(avro_strerror());
 				}
 
-				PopulateValue(&item, list_value, 0, nullptr, &type);
+				PopulateValue(&item, list_value, 0, &type);
 			}
 			break;
 		}
 		case LogicalTypeId::STRUCT: {
-			AvroValueMapping new_mapping;
-			reference<AvroValueMapping> mapping(new_mapping);
-			if (mapping_p) {
-				mapping = *mapping_p;
-			} else {
-				new_mapping.target = *target;
-				D_ASSERT(avro_value_get_type(&new_mapping.target) == AVRO_UNION);
-				auto union_mapping = new_mapping.target;
-				avro_value_set_branch(&union_mapping, 1, &new_mapping.target);
-				PopulateMappingChildren(new_mapping, type);
-			}
-
 			auto &struct_values = StructValue::GetChildren(val);
-			auto &child_mappings = mapping.get().child_mappings;
-			D_ASSERT(child_mappings.size() == struct_values.size());
 			for (idx_t i = 0; i < struct_values.size(); i++) {
-				auto &child_mapping = child_mappings[i];
-				PopulateValue(&child_mapping.target, struct_values[i], i, child_mapping, &type);
+				const char *unused_name;
+				avro_value_t field;
+				if (avro_value_get_by_index(target, i, &field, &unused_name)) {
+					throw InvalidInputException(avro_strerror());
+				}
+				PopulateValue(&field, struct_values[i], i, &type);
 			}
 			break;
 		}
@@ -442,9 +368,14 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 	idx_t count = input.size();
 	for (idx_t i = 0; i < count; i++) {
 		for (idx_t col_idx = 0; col_idx < input.ColumnCount(); col_idx++) {
-			auto &mapping = local_state.mappings[col_idx];
 			auto val = input.GetValue(col_idx, i);
-			PopulateValue(&mapping.target, val, col_idx, mapping, nullptr);
+
+			const char *unused_name;
+			avro_value_t column;
+			if (avro_value_get_by_index(&local_state.value, i, &column, &unused_name)) {
+				throw InvalidInputException(avro_strerror());
+			}
+			PopulateValue(&column, val, col_idx, nullptr);
 		}
 		avro_file_writer_append_value(global_state.file_writer, &local_state.value);
 		avro_value_reset(&local_state.value);

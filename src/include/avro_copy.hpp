@@ -36,14 +36,6 @@ public:
 	avro_schema_t schema = nullptr;
 };
 
-struct AvroValueMapping {
-public:
-	AvroValueMapping() {}
-public:
-	avro_value_t target;
-	vector<AvroValueMapping> child_mappings;
-};
-
 struct WriteAvroLocalState : public LocalFunctionData {
 public:
 	WriteAvroLocalState(FunctionData &bind_data_p);
@@ -51,8 +43,6 @@ public:
 public:
 	//! Avro value representing a row of the schema
 	avro_value_t value;
-	//! Mapping from Vector index to avro_value
-	vector<AvroValueMapping> mappings;
 };
 
 struct WriteAvroGlobalState : public GlobalFunctionData {
