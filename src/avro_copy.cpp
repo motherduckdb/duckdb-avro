@@ -162,68 +162,6 @@ WriteAvroBindData::~WriteAvroBindData() {
 	avro_schema_decref(schema);
 }
 
-static void VerifyType(avro_value_t *val, const LogicalType &type) {
-	#ifdef DEBUG
-	auto avro_type = avro_value_get_type(val);
-	switch (type.id()) {
-		case LogicalType::SQLNULL: {
-			D_ASSERT(avro_type == AVRO_NULL);
-			break;
-		}
-		case LogicalType::BOOLEAN: {
-			D_ASSERT(avro_type == AVRO_BOOLEAN);
-			break;
-		}
-		case LogicalType::INTEGER: {
-			D_ASSERT(avro_type == AVRO_INT32);
-			break;
-		}
-		case LogicalType::BIGINT: {
-			D_ASSERT(avro_type == AVRO_INT64);
-			break;
-		}
-		case LogicalType::FLOAT: {
-			D_ASSERT(avro_type == AVRO_FLOAT);
-			break;
-		}
-		case LogicalType::DOUBLE: {
-			D_ASSERT(avro_type == AVRO_DOUBLE);
-			break;
-		}
-		case LogicalType::BLOB: {
-			D_ASSERT(avro_type == AVRO_BYTES);
-			break;
-		}
-		case LogicalType::VARCHAR: {
-			D_ASSERT(avro_type == AVRO_STRING);
-			break;
-		}
-		case LogicalTypeId::UNION: {
-			D_ASSERT(avro_type == AVRO_UNION);
-			break;
-		}
-		case LogicalTypeId::STRUCT: {
-			D_ASSERT(avro_type == AVRO_RECORD);
-			break;
-		}
-		case LogicalTypeId::ENUM: {
-			D_ASSERT(avro_type == AVRO_ENUM);
-			break;
-		}
-		case LogicalTypeId::LIST: {
-			D_ASSERT(avro_type == AVRO_ARRAY);
-			break;
-		}
-		case LogicalTypeId::MAP: {
-			D_ASSERT(avro_type == AVRO_ARRAY);
-			break;
-		}
-		default:
-			throw NotImplementedException("Can't verify for type '%s'", type.ToString());
-	};
-	#endif
-}
-
 WriteAvroLocalState::WriteAvroLocalState(FunctionData &bind_data_p) {
 	auto &bind_data = bind_data_p.Cast<WriteAvroBindData>();
 	auto &global_state = bind_data.global_state->Cast<WriteAvroGlobalState>();
@@ -270,9 +208,9 @@ static unique_ptr<GlobalFunctionData> WriteAvroInitializeGlobal(ClientContext &c
 	return res;
 }
 
-static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx, optional_ptr<const LogicalType> parent);
+static void PopulateValue(avro_value_t *target, const Value &val);
 
-static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx, optional_ptr<const LogicalType> parent) {
+static void PopulateValue(avro_value_t *target, const Value &val) {
 	auto &type = val.type();
 
 	//! FIXME: add tests for nulls
@@ -284,49 +222,59 @@ static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx,
 		return;
 	}
 	avro_value_set_branch(&union_value, 1, target);
+	auto avro_type = avro_value_get_type(target);
 
 	switch (type.id()) {
 		case LogicalTypeId::BOOLEAN: {
+			D_ASSERT(avro_type == AVRO_BOOLEAN);
 			auto boolean = val.GetValueUnsafe<bool>();
 			avro_value_set_boolean(target, boolean);
 			break;
 		}
 		case LogicalTypeId::BLOB: {
+			D_ASSERT(avro_type == AVRO_BYTES);
 			auto str = val.GetValueUnsafe<string_t>();
 			avro_value_set_bytes(target, (void *)str.GetData(), str.GetSize());
 			break;
 		}
 		case LogicalTypeId::DOUBLE: {
+			D_ASSERT(avro_type == AVRO_DOUBLE);
 			auto value = val.GetValueUnsafe<double>();
 			avro_value_set_double(target, value);
 			break;
 		}
 		case LogicalTypeId::FLOAT: {
+			D_ASSERT(avro_type == AVRO_FLOAT);
 			auto value = val.GetValueUnsafe<float>();
 			avro_value_set_float(target, value);
 			break;
 		}
 		case LogicalTypeId::INTEGER: {
+			D_ASSERT(avro_type == AVRO_INT32);
 			auto integer = val.GetValueUnsafe<int32_t>();
 			avro_value_set_int(target, integer);
 			break;
 		}
 		case LogicalTypeId::BIGINT: {
+			D_ASSERT(avro_type == AVRO_INT64);
 			auto bigint = val.GetValueUnsafe<int64_t>();
 			avro_value_set_long(target, bigint);
 			break;
 		}
 		case LogicalTypeId::VARCHAR: {
+			D_ASSERT(avro_type == AVRO_STRING);
 			auto str = val.GetValueUnsafe<string_t>();
 			avro_value_set_string_len(target, str.GetData(), str.GetSize() + 1);
 			break;
 		}
 		case LogicalTypeId::ENUM: {
+			D_ASSERT(avro_type == AVRO_ENUM);
 			//! TODO: add support for ENUM
 			throw NotImplementedException("Can't convert ENUM Value (%s) to Avro yet", val.ToString());
 		}
 		case LogicalTypeId::MAP:
 		case LogicalTypeId::LIST: {
+			D_ASSERT(avro_type == AVRO_ARRAY);
 			auto &list_values = ListValue::GetChildren(val);
 			for (idx_t i = 0; i < list_values.size(); i++) {
 				auto &list_value = list_values[i];
@@ -337,11 +285,12 @@ static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx,
 					throw InvalidInputException(avro_strerror());
 				}
 
-				PopulateValue(&item, list_value, 0, &type);
+				PopulateValue(&item, list_value);
 			}
 			break;
 		}
 		case LogicalTypeId::STRUCT: {
+			D_ASSERT(avro_type == AVRO_RECORD);
 			auto &struct_values = StructValue::GetChildren(val);
 			for (idx_t i = 0; i < struct_values.size(); i++) {
 				const char *unused_name;
@@ -349,7 +298,7 @@ static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx,
 				if (avro_value_get_by_index(target, i, &field, &unused_name)) {
 					throw InvalidInputException(avro_strerror());
 				}
-				PopulateValue(&field, struct_values[i], i, &type);
+				PopulateValue(&field, struct_values[i]);
 			}
 			break;
 		}
@@ -361,9 +310,6 @@ static void PopulateValue(avro_value_t *target, const Value &val, idx_t col_idx,
 static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, GlobalFunctionData &gstate_p, LocalFunctionData &lstate_p, DataChunk &input) {
 	auto &global_state = gstate_p.Cast<WriteAvroGlobalState>();
 	auto &local_state = lstate_p.Cast<WriteAvroLocalState>();
-	auto &bind_data = bind_data_p.Cast<WriteAvroBindData>();
-
-	auto formats = input.ToUnifiedFormat();
 
 	idx_t count = input.size();
 	for (idx_t i = 0; i < count; i++) {
@@ -372,10 +318,10 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 
 			const char *unused_name;
 			avro_value_t column;
-			if (avro_value_get_by_index(&local_state.value, i, &column, &unused_name)) {
+			if (avro_value_get_by_index(&local_state.value, col_idx, &column, &unused_name)) {
 				throw InvalidInputException(avro_strerror());
 			}
-			PopulateValue(&column, val, col_idx, nullptr);
+			PopulateValue(&column, val);
 		}
 		avro_file_writer_append_value(global_state.file_writer, &local_state.value);
 		avro_value_reset(&local_state.value);
