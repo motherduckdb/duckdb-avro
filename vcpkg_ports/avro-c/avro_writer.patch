@@ -1,19 +1,16 @@
 diff --git a/lang/c/src/avro/io.h b/lang/c/src/avro/io.h
-index ffbb68dc5..af9e89da6 100644
+index ffbb68dc5..ef1af202c 100644
 --- a/lang/c/src/avro/io.h
 +++ b/lang/c/src/avro/io.h
-@@ -52,6 +52,10 @@ avro_reader_memory_set_source(avro_reader_t reader, const char *buf, int64_t len
+@@ -52,6 +52,7 @@ avro_reader_memory_set_source(avro_reader_t reader, const char *buf, int64_t len
  void
  avro_writer_memory_set_dest(avro_writer_t writer, const char *buf, int64_t len);
  
-+int64_t
-+avro_writer_memory_get_written_bytes(avro_writer_t writer);
-+
 +
  int avro_read(avro_reader_t reader, void *buf, int64_t len);
  int avro_skip(avro_reader_t reader, int64_t len);
  int avro_write(avro_writer_t writer, void *buf, int64_t len);
-@@ -109,6 +113,7 @@ int avro_file_writer_create_with_codec(const char *path,
+@@ -109,6 +110,7 @@ int avro_file_writer_create_with_codec(const char *path,
  int avro_file_writer_create_with_codec_fp(FILE *fp, const char *path, int should_close,
  				avro_schema_t schema, avro_file_writer_t * writer,
  				const char *codec, size_t block_size);
@@ -21,8 +18,17 @@ index ffbb68dc5..af9e89da6 100644
  int avro_file_writer_open(const char *path, avro_file_writer_t * writer);
  int avro_file_writer_open_bs(const char *path, avro_file_writer_t * writer, size_t block_size);
  int avro_file_reader(const char *path, avro_file_reader_t * reader);
+@@ -118,6 +120,8 @@ int avro_file_reader_fp(FILE *fp, const char *path, int should_close,
+ avro_schema_t
+ avro_file_reader_get_writer_schema(avro_file_reader_t reader);
+ 
++int64_t avro_file_writer_datum_writer_tell(avro_file_writer_t writer);
++
+ int avro_file_writer_sync(avro_file_writer_t writer);
+ int avro_file_writer_flush(avro_file_writer_t writer);
+ int avro_file_writer_close(avro_file_writer_t writer);
 diff --git a/lang/c/src/datafile.c b/lang/c/src/datafile.c
-index c9d4dfeb6..e072a537d 100644
+index c9d4dfeb6..8f14f4656 100644
 --- a/lang/c/src/datafile.c
 +++ b/lang/c/src/datafile.c
 @@ -238,6 +238,59 @@ int avro_file_writer_create_with_codec_fp(FILE *fp, const char *path, int should
@@ -85,23 +91,14 @@ index c9d4dfeb6..e072a537d 100644
  static int file_read_header(avro_reader_t reader,
  			    avro_schema_t * writers_schema, avro_codec_t codec,
  			    char *sync, int synclen)
-diff --git a/lang/c/src/io.c b/lang/c/src/io.c
-index c1e2f5dc9..059d29cea 100644
---- a/lang/c/src/io.c
-+++ b/lang/c/src/io.c
-@@ -183,6 +183,15 @@ avro_writer_memory_set_dest(avro_writer_t writer, const char *buf, int64_t len)
- 	}
+@@ -658,6 +711,10 @@ avro_file_writer_append_encoded(avro_file_writer_t w,
+ 	return 0;
  }
  
-+int64_t
-+avro_writer_memory_get_written_bytes(avro_writer_t writer)
-+{
-+	if (is_memory_io(writer)) {
-+		struct _avro_writer_memory_t *mem_writer = avro_writer_to_memory(writer);
-+		return mem_writer->written;
-+	}
++int64_t avro_file_writer_datum_writer_tell(avro_file_writer_t writer) {
++	return avro_writer_tell(writer->datum_writer);
 +}
 +
- static int
- avro_read_memory(struct _avro_reader_memory_t *reader, void *buf, int64_t len)
+ int avro_file_writer_sync(avro_file_writer_t w)
  {
+ 	return file_write_block(w);

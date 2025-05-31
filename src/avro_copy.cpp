@@ -151,7 +151,7 @@ static string CreateJSONSchema(const vector<string> &names, const vector<Logical
 }
 
 WriteAvroBindData::WriteAvroBindData(const vector<string> &names, const vector<LogicalType> &types) : names(names), types(types) {
-	auto json_schema = CreateJSONSchema(names, types);
+	json_schema = CreateJSONSchema(names, types);
 	Printer::Print(json_schema);
 	if (avro_schema_from_json_length(json_schema.c_str(), json_schema.size(), &schema)) {
 		throw InvalidInputException(avro_strerror());
@@ -177,16 +177,29 @@ WriteAvroGlobalState::~WriteAvroGlobalState() {
 }
 
 WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData &bind_data_p, FileSystem &fs, const string &file_path)
-	: stream(Allocator::Get(context), BUFFER_SIZE), fs(fs) {
+	: allocator(Allocator::Get(context)), memory_buffer(allocator), fs(fs) {
 	handle = fs.OpenFile(file_path, FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW | FileLockType::WRITE_LOCK | FileCompressionType::AUTO_DETECT);
-	writer = avro_writer_memory(const_char_ptr_cast(stream.GetData()), stream.GetCapacity());
 	auto &bind_data = bind_data_p.Cast<WriteAvroBindData>();
 
-	if (avro_file_writer_create_from_writer(writer, bind_data.schema, &file_writer)) {
-		avro_writer_free(writer);
-		throw InvalidInputException(avro_strerror());
-	}
+	//! Guess how big the "header" of the Avro file needs to be
+	idx_t capacity = MaxValue<idx_t>(BUFFER_SIZE, NextPowerOfTwo(bind_data.json_schema.size() + 16 + 4));
+	memory_buffer.Resize(capacity);
 
+	int ret;
+	do {
+		//! Create a memory writer to store the header
+		writer = avro_writer_memory(const_char_ptr_cast(memory_buffer.GetData()), memory_buffer.GetCapacity());
+		ret = avro_file_writer_create_from_writer(writer, bind_data.schema, &file_writer);
+		if (ret) {
+			avro_writer_free(writer);
+			auto current_capacity = memory_buffer.GetCapacity();
+			memory_buffer.Resize(NextPowerOfTwo(current_capacity * 2));
+		}
+	} while (ret);
+
+	auto written_bytes = avro_writer_tell(writer);
+	WriteData(memory_buffer.GetData(), written_bytes);
+	avro_writer_memory_set_dest(writer, (const char *)memory_buffer.GetData(), memory_buffer.GetCapacity());
 	interface = avro_generic_class_from_schema(bind_data.schema);
 }
 
@@ -327,10 +340,25 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 		avro_value_reset(&local_state.value);
 	}
 
-	avro_file_writer_flush(global_state.file_writer);
-	auto written_bytes = avro_writer_memory_get_written_bytes(global_state.writer);
-	global_state.WriteData(global_state.stream.GetData(), written_bytes);
-	avro_writer_memory_set_dest(global_state.writer, (const char *)global_state.stream.GetData(), global_state.stream.GetCapacity());
+	auto &buffer = global_state.memory_buffer;
+	auto expected_size = avro_file_writer_datum_writer_tell(global_state.file_writer);
+	expected_size += 16 + 4;
+	if (expected_size > buffer.GetCapacity()) {
+		//! Resize the buffer in advance, to prevent any need for resizing below
+		buffer.Resize(NextPowerOfTwo(expected_size));
+		avro_writer_memory_set_dest(global_state.writer, (const char *)buffer.GetData(), buffer.GetCapacity());
+	}
+
+	//! Flush the contents to the buffer, if it fails, resize the buffer and try again
+	while (avro_file_writer_flush(global_state.file_writer)) {
+		auto current_capacity = buffer.GetCapacity();
+		buffer.Resize(NextPowerOfTwo(current_capacity * 2));
+		avro_writer_memory_set_dest(global_state.writer, (const char *)buffer.GetData(), buffer.GetCapacity());
+	}
+
+	auto written_bytes = avro_writer_tell(global_state.writer);
+	global_state.WriteData(buffer.GetData(), written_bytes);
+	avro_writer_memory_set_dest(global_state.writer, (const char *)buffer.GetData(), buffer.GetCapacity());
 }
 
 static void WriteAvroCombine(ExecutionContext &context, FunctionData &bind_data, GlobalFunctionData &gstate, LocalFunctionData &lstate) {
