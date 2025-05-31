@@ -44,17 +44,6 @@ static string ConvertTypeToAvro(const LogicalType &type) {
 	//! FIXME: we don't have support for 'FIXED' currently (a fixed size blob)
 }
 
-static void VerifyAvroName(const string &name) {
-	D_ASSERT(!name.empty());
-	for (idx_t i = 0; i < name.size(); i++) {
-		if (!(isalpha(name[i]) || name[i] == '_' || (i && isdigit(name[i])))) {
-			throw InvalidInputException(
-			    "'%s' is not a valid Avro identifier\nThe identifier has to match the regex: [A-Za-z_][A-Za-z0-9_]*",
-			    name);
-		}
-	}
-}
-
 struct JSONSchemaGenerator {
 public:
 	JSONSchemaGenerator() {
@@ -72,6 +61,21 @@ public:
 	}
 
 public:
+	void VerifyAvroName(const string &name) {
+		D_ASSERT(!name.empty());
+		for (idx_t i = 0; i < name.size(); i++) {
+			if (!(isalpha(name[i]) || name[i] == '_' || (i && isdigit(name[i])))) {
+				throw InvalidInputException(
+					"'%s' is not a valid Avro identifier\nThe identifier has to match the regex: [A-Za-z_][A-Za-z0-9_]*",
+					name);
+			}
+		}
+		auto res = named_schemas.insert(name);
+		if (!res.second) {
+			throw BinderException("Avro schema by the name of '%s' already exists, all names in the entire avro schema have to be unique", name);
+		}
+	}
+
 	string GenerateSchemaName(const string &base) {
 		return StringUtil::Format("%s%d", base, generated_name_id++);
 	}
@@ -178,6 +182,7 @@ public:
 	idx_t generated_name_id = 0;
 	yyjson_mut_doc *doc = nullptr;
 	yyjson_mut_val *root_object;
+	unordered_set<string> named_schemas;
 };
 
 static string CreateJSONSchema(const vector<string> &names, const vector<LogicalType> &types) {

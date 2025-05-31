@@ -1,0 +1,15 @@
+require avro
+
+statement error
+COPY (
+	select {
+		'a': {
+			'child': 21
+		},
+		'b': {
+			'child': true
+		}
+	} my_struct
+) TO '__TEST_DIR__/tmp.avro';
+----
+Binder Error: Avro schema by the name of 'child' already exists, all names in the entire avro schema have to be unique
