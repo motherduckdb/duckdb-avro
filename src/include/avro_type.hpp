@@ -29,6 +29,7 @@ public:
 		D_ASSERT(HasFieldId());
 		return field_id;
 	}
+
 public:
 	// we use special transformation rules for unions with null:
 	// 1) the null does not become a union entry and
@@ -92,7 +93,7 @@ public:
 			if (children.empty()) {
 				throw InvalidInputException("Empty union type");
 			}
-			
+
 			child_list_t<LogicalType> type_children;
 			for (auto &child : children) {
 				type_children.emplace_back(child.name, child.type);

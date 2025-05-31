@@ -14,8 +14,10 @@ struct AvroCopyFunction {
 struct WriteAvroBindData : public FunctionData {
 public:
 	WriteAvroBindData(const vector<string> &names, const vector<LogicalType> &types);
-	WriteAvroBindData() {}
+	WriteAvroBindData() {
+	}
 	virtual ~WriteAvroBindData();
+
 public:
 	unique_ptr<FunctionData> Copy() const override {
 		//! FIXME: actually implement
@@ -39,7 +41,8 @@ public:
 
 struct AvroInMemoryBuffer {
 public:
-	AvroInMemoryBuffer(Allocator &allocator, idx_t initial_capacity = 0) : allocator(allocator), capacity(initial_capacity) {
+	AvroInMemoryBuffer(Allocator &allocator, idx_t initial_capacity = 0)
+	    : allocator(allocator), capacity(initial_capacity) {
 		if (initial_capacity) {
 			Allocate(capacity);
 		}
@@ -49,6 +52,7 @@ public:
 			allocator.FreeData(data, capacity);
 		}
 	}
+
 public:
 	void Resize(idx_t new_capacity) {
 		D_ASSERT(this->capacity < new_capacity);
@@ -74,12 +78,14 @@ public:
 	idx_t GetCapacity() const {
 		return capacity;
 	}
+
 private:
 	void Allocate(idx_t new_capacity) {
 		D_ASSERT(!data);
 		data = allocator.AllocateData(new_capacity);
 		capacity = new_capacity;
 	}
+
 public:
 	Allocator &allocator;
 	data_ptr_t data = nullptr;
@@ -90,9 +96,11 @@ struct WriteAvroGlobalState : public GlobalFunctionData {
 public:
 	static constexpr idx_t BUFFER_SIZE = 1024;
 	static constexpr idx_t DATUM_BUFFER_SIZE = 16 * 1024;
+
 public:
 	WriteAvroGlobalState(ClientContext &context, FunctionData &bind_data_p, FileSystem &fs, const string &file_path);
 	virtual ~WriteAvroGlobalState();
+
 public:
 	void WriteData(const_data_ptr_t data, idx_t size) {
 		lock_guard<mutex> flock(lock);
@@ -103,6 +111,7 @@ public:
 		lock_guard<mutex> flock(lock);
 		return handle->GetFileSize();
 	}
+
 public:
 	Allocator &allocator;
 	AvroInMemoryBuffer memory_buffer;
@@ -125,6 +134,7 @@ struct WriteAvroLocalState : public LocalFunctionData {
 public:
 	WriteAvroLocalState(FunctionData &bind_data_p);
 	virtual ~WriteAvroLocalState();
+
 public:
 	//! Avro value representing a row of the schema
 	avro_value_t value;

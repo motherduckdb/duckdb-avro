@@ -351,10 +351,10 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type, Vect
 			auto &key_vector = MapVector::GetKeys(target);
 			auto &value_vector = MapVector::GetValues(target);
 
-			auto &key_type =  avro_type.children[0].second;
+			auto &key_type = avro_type.children[0].second;
 			//! Unused, always VARCHAR
 			(void)key_type;
-			auto &value_type =  avro_type.children[1].second;
+			auto &value_type = avro_type.children[1].second;
 			D_ASSERT(key_vector.GetType().id() == LogicalTypeId::VARCHAR);
 			auto string_ptr = FlatVector::GetData<string_t>(key_vector);
 			for (idx_t entry_idx = 0; entry_idx < list_len; entry_idx++) {

@@ -1,0 +1,35 @@
+require avro
+
+statement ok
+create view vw as
+	select [
+		{
+			'field_string': 'this is not an inlined string',
+			'field_bytes': '\x12\x13\x14\xaf\xa1\x20\x34'::BLOB,
+			'field_int': 2147483647,
+			'field_long': 9223372036854775807,
+			'field_float': 1.23::FLOAT,
+			'field_double': 3.141592653589793::DOUBLE,
+			'field_boolean': true,
+			'field_null': NULL,
+			'field_map': MAP {
+				21: 'abc',
+				42: 'test'
+			}
+		}
+		for x in range(10000)
+	] a from range(10)
+
+statement ok
+COPY (
+	select * from vw
+) TO '__TEST_DIR__/large_list_struct_coverage.avro';
+
+query I nosort basic
+select * from vw;
+----
+
+query I nosort basic
+select * from read_avro('__TEST_DIR__/large_list_struct_coverage.avro')
+----
+
