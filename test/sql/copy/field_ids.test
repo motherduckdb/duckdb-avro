@@ -1,0 +1,17 @@
+require avro
+
+statement ok
+COPY (
+	select {
+		'a': 21,
+		'b': NULL,
+		'c': 'test'
+	} field1
+) TO '__TEST_DIR__/field_ids.avro' (
+	FIELD_IDS MAP {
+		'a': 100,
+		'b': 200,
+		'c': 300
+	},
+	ROOT_NAME 'test'
+);

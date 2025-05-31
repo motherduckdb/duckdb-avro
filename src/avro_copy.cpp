@@ -44,15 +44,61 @@ static string ConvertTypeToAvro(const LogicalType &type) {
 	//! FIXME: we don't have support for 'FIXED' currently (a fixed size blob)
 }
 
+struct AvroCopyInput {
+public:
+	AvroCopyInput(CopyFunctionBindInput &input) {
+		auto &options = input.info.options;
+
+		ParseFieldIds(options);
+		ParseRootName(options);
+	}
+private:
+	void ParseFieldIds(const case_insensitive_map_t<vector<Value>> &options) {
+		auto it = options.find("FIELD_IDS");
+		if (it != options.end()) {
+			auto &value = it->second[0];
+			if (value.type().id() != LogicalTypeId::MAP) {
+				throw InvalidInputException("'FIELD_IDS' is expected to be provided as a MAP(VARCHAR, INT), a mapping of schema name to field id");
+			}
+			auto &items = MapValue::GetChildren(value);
+			auto &key_type = MapType::KeyType(value.type());
+			auto &value_type = MapType::ValueType(value.type());
+			if (key_type.id() != LogicalTypeId::VARCHAR) {
+				throw InvalidInputException("Map keys should be VARCHAR, the schema name");
+			}
+			if (value_type.id() != LogicalTypeId::INTEGER) {
+				throw InvalidInputException("Map values should be INTEGER, the field id");
+			}
+			for (auto &item : items) {
+				auto &key_value = StructValue::GetChildren(item);
+				field_ids.emplace(key_value[0].GetValue<string>(), key_value[1].GetValue<int32_t>());
+			}
+		}
+	}
+	void ParseRootName(const case_insensitive_map_t<vector<Value>> &options) {
+		auto it = options.find("ROOT_NAME");
+		if (it != options.end()) {
+			auto &value = it->second[0];
+			if (value.type().id() != LogicalTypeId::VARCHAR) {
+				throw InvalidInputException("'ROOT_NAME' is expected to be provided as VARCHAR, this is used for the name of the top level 'record'");
+			}
+			root_name = value.GetValue<string>();
+		}
+	}
+public:
+	string root_name = "root";
+	unordered_map<string, int32_t> field_ids;
+};
+
 struct JSONSchemaGenerator {
 public:
-	JSONSchemaGenerator() {
+	JSONSchemaGenerator(const AvroCopyInput &input) : input(input) {
 		doc = yyjson_mut_doc_new(nullptr);
 		root_object = yyjson_mut_obj(doc);
 		yyjson_mut_doc_set_root(doc, root_object);
 		yyjson_mut_obj_add_str(doc, root_object, "type", "record");
 		//! TODO: get this name from the bind input
-		yyjson_mut_obj_add_str(doc, root_object, "name", "manifest_file");
+		yyjson_mut_obj_add_strcpy(doc, root_object, "name", input.root_name.c_str());
 	}
 	~JSONSchemaGenerator() {
 		if (doc) {
@@ -81,8 +127,6 @@ public:
 	}
 
 	yyjson_mut_val *CreateJSONType(const string &name, const LogicalType &type, bool struct_field = false) {
-		//! TODO: actually get the field ids
-		int32_t field_id = 42;
 		yyjson_mut_val *object;
 		if (!type.IsNested()) {
 			object = yyjson_mut_obj(doc);
@@ -91,7 +135,10 @@ public:
 			//    "type": "bool"
 			//    < additional fields >
 			// }
-			yyjson_mut_obj_add_int(doc, object, "field-id", field_id);
+			auto it = input.field_ids.find(name);
+			if (it != input.field_ids.end()) {
+				yyjson_mut_obj_add_int(doc, object, "field-id", it->second);
+			}
 			if (struct_field) {
 				VerifyAvroName(name);
 				yyjson_mut_obj_add_strcpy(doc, object, "name", name.c_str());
@@ -111,9 +158,6 @@ public:
 	}
 
 	yyjson_mut_val *CreateNestedType(const string &name, const LogicalType &type) {
-		//! TODO: actually get the field ids
-		int32_t field_id = 42;
-
 		D_ASSERT(type.IsNested());
 		auto object = yyjson_mut_obj(doc);
 		yyjson_mut_obj_add_strcpy(doc, object, "type", ConvertTypeToAvro(type).c_str());
@@ -133,7 +177,10 @@ public:
 		case LogicalTypeId::MAP:
 		case LogicalTypeId::LIST: {
 			if (type.id() == LogicalTypeId::LIST) {
-				yyjson_mut_obj_add_int(doc, object, "element-id", field_id);
+				auto it = input.field_ids.find(name);
+				if (it != input.field_ids.end()) {
+					yyjson_mut_obj_add_int(doc, object, "element-id", it->second);
+				}
 			} else {
 				D_ASSERT(type.id() == LogicalTypeId::MAP);
 				yyjson_mut_obj_add_strcpy(doc, object, "logicalType", "map");
@@ -178,21 +225,23 @@ public:
 	}
 
 public:
+	const AvroCopyInput &input;
 	idx_t generated_name_id = 0;
 	yyjson_mut_doc *doc = nullptr;
 	yyjson_mut_val *root_object;
 	unordered_set<string> named_schemas;
 };
 
-static string CreateJSONSchema(const vector<string> &names, const vector<LogicalType> &types) {
-	JSONSchemaGenerator state;
-
+static string CreateJSONSchema(const AvroCopyInput &input, const vector<string> &names, const vector<LogicalType> &types) {
+	JSONSchemaGenerator state(input);
 	return state.GenerateJSON(names, types);
 }
 
-WriteAvroBindData::WriteAvroBindData(const vector<string> &names, const vector<LogicalType> &types)
+WriteAvroBindData::WriteAvroBindData(CopyFunctionBindInput &input, const vector<string> &names, const vector<LogicalType> &types)
     : names(names), types(types) {
-	json_schema = CreateJSONSchema(names, types);
+
+	AvroCopyInput avro_copy_input(input);
+	json_schema = CreateJSONSchema(avro_copy_input, names, types);
 	Printer::Print(json_schema);
 	if (avro_schema_from_json_length(json_schema.c_str(), json_schema.size(), &schema)) {
 		throw InvalidInputException(avro_strerror());
@@ -248,7 +297,7 @@ WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData 
 
 static unique_ptr<FunctionData> WriteAvroBind(ClientContext &context, CopyFunctionBindInput &input,
                                               const vector<string> &names, const vector<LogicalType> &sql_types) {
-	auto res = make_uniq<WriteAvroBindData>(names, sql_types);
+	auto res = make_uniq<WriteAvroBindData>(input, names, sql_types);
 	return res;
 }
 
