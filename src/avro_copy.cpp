@@ -242,7 +242,6 @@ WriteAvroBindData::WriteAvroBindData(CopyFunctionBindInput &input, const vector<
 
 	AvroCopyInput avro_copy_input(input);
 	json_schema = CreateJSONSchema(avro_copy_input, names, types);
-	Printer::Print(json_schema);
 	if (avro_schema_from_json_length(json_schema.c_str(), json_schema.size(), &schema)) {
 		throw InvalidInputException(avro_strerror());
 	}
