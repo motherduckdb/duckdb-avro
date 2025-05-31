@@ -103,7 +103,6 @@ public:
 		auto wrapper = yyjson_mut_obj(doc);
 		auto union_type = yyjson_mut_obj_add_arr(doc, wrapper, "type");
 		if (struct_field) {
-			VerifyAvroName(name);
 			yyjson_mut_obj_add_strcpy(doc, wrapper, "name", name.c_str());
 		}
 		yyjson_mut_arr_add_strcpy(doc, union_type, "null");
