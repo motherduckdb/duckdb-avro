@@ -363,21 +363,15 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 			new_capacity += value_size;
 			datum_buffer.ResizeAndCopy(NextPowerOfTwo(new_capacity));
 		}
-		const char *datum_writer_buffer = (const char *)datum_buffer.GetData();
-		datum_writer_buffer += offset_in_datum_buffer;
-		avro_writer_memory_set_dest(global_state.datum_writer, datum_writer_buffer, length);
+		avro_writer_memory_set_dest_with_offset(global_state.datum_writer, (const char *)datum_buffer.GetData(), datum_buffer.GetCapacity(), offset_in_datum_buffer);
 
 		while (avro_file_writer_append_value(global_state.file_writer, &local_state.value)) {
 			auto current_capacity = datum_buffer.GetCapacity();
 			datum_buffer.ResizeAndCopy(NextPowerOfTwo(current_capacity * 2));
-
-			const char *datum_writer_buffer = (const char *)datum_buffer.GetData();
-			datum_writer_buffer += offset_in_datum_buffer;
-			length = datum_buffer.GetCapacity() - offset_in_datum_buffer;
-			avro_writer_memory_set_dest(global_state.datum_writer, datum_writer_buffer, length);
+			avro_writer_memory_set_dest_with_offset(global_state.datum_writer, (const char *)datum_buffer.GetData(), datum_buffer.GetCapacity(), offset_in_datum_buffer);
 		}
 
-		offset_in_datum_buffer += avro_writer_tell(global_state.datum_writer);
+		offset_in_datum_buffer = avro_writer_tell(global_state.datum_writer);
 		avro_value_reset(&local_state.value);
 	}
 

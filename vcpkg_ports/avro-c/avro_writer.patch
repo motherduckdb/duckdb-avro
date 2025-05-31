@@ -1,16 +1,19 @@
 diff --git a/lang/c/src/avro/io.h b/lang/c/src/avro/io.h
-index ffbb68dc5..7f5ddd191 100644
+index ffbb68dc5..06253fe48 100644
 --- a/lang/c/src/avro/io.h
 +++ b/lang/c/src/avro/io.h
-@@ -52,6 +52,7 @@ avro_reader_memory_set_source(avro_reader_t reader, const char *buf, int64_t len
+@@ -52,6 +52,10 @@ avro_reader_memory_set_source(avro_reader_t reader, const char *buf, int64_t len
  void
  avro_writer_memory_set_dest(avro_writer_t writer, const char *buf, int64_t len);
  
++void
++avro_writer_memory_set_dest_with_offset(avro_writer_t writer, const char *buf, int64_t len, int64_t offset);
++
 +
  int avro_read(avro_reader_t reader, void *buf, int64_t len);
  int avro_skip(avro_reader_t reader, int64_t len);
  int avro_write(avro_writer_t writer, void *buf, int64_t len);
-@@ -60,6 +61,8 @@ void avro_reader_reset(avro_reader_t reader);
+@@ -60,6 +64,8 @@ void avro_reader_reset(avro_reader_t reader);
  
  void avro_writer_reset(avro_writer_t writer);
  int64_t avro_writer_tell(avro_writer_t writer);
@@ -19,7 +22,7 @@ index ffbb68dc5..7f5ddd191 100644
  void avro_writer_flush(avro_writer_t writer);
  
  void avro_writer_dump(avro_writer_t writer, FILE * fp);
-@@ -109,6 +112,7 @@ int avro_file_writer_create_with_codec(const char *path,
+@@ -109,6 +115,7 @@ int avro_file_writer_create_with_codec(const char *path,
  int avro_file_writer_create_with_codec_fp(FILE *fp, const char *path, int should_close,
  				avro_schema_t schema, avro_file_writer_t * writer,
  				const char *codec, size_t block_size);
@@ -85,10 +88,28 @@ index c9d4dfeb6..6795ff06a 100644
  		/* Write the block length */
  		check_prefix(rval, enc->write_long(w->writer, w->codec->used_size),
 diff --git a/lang/c/src/io.c b/lang/c/src/io.c
-index c1e2f5dc9..2f01e3f65 100644
+index c1e2f5dc9..5fec10b0d 100644
 --- a/lang/c/src/io.c
 +++ b/lang/c/src/io.c
-@@ -388,6 +388,14 @@ int64_t avro_writer_tell(avro_writer_t writer)
+@@ -183,6 +183,17 @@ avro_writer_memory_set_dest(avro_writer_t writer, const char *buf, int64_t len)
+ 	}
+ }
+ 
++void
++avro_writer_memory_set_dest_with_offset(avro_writer_t writer, const char *buf, int64_t len, int64_t offset)
++{
++	if (is_memory_io(writer)) {
++		struct _avro_writer_memory_t *mem_writer = avro_writer_to_memory(writer);
++		mem_writer->buf = buf;
++		mem_writer->len = len;
++		mem_writer->written = offset;
++	}
++}
++
+ static int
+ avro_read_memory(struct _avro_reader_memory_t *reader, void *buf, int64_t len)
+ {
+@@ -388,6 +399,14 @@ int64_t avro_writer_tell(avro_writer_t writer)
  	return EINVAL;
  }
  
