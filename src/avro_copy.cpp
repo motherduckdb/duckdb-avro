@@ -44,6 +44,15 @@ static string ConvertTypeToAvro(const LogicalType &type) {
 	//! FIXME: we don't have support for 'FIXED' currently (a fixed size blob)
 }
 
+static void VerifyAvroName(const string &name) {
+	D_ASSERT(!name.empty());
+	for (idx_t i = 0; i < name.size(); i++) {
+		if (!(isalpha(name[i]) || name[i] == '_' || (i && isdigit(name[i])))) {
+			throw InvalidInputException("'%s' is not a valid Avro identifier\nThe identifier has to match the regex: [A-Za-z_][A-Za-z0-9_]*", name);
+		}
+	}
+}
+
 static yyjson_mut_val *CreateJSONType(yyjson_mut_doc *doc, const string &name, const LogicalType &type, bool struct_field = false);
 
 static yyjson_mut_val *CreateNestedType(yyjson_mut_doc *doc, const string &name, const LogicalType &type) {
@@ -53,6 +62,7 @@ static yyjson_mut_val *CreateNestedType(yyjson_mut_doc *doc, const string &name,
 	D_ASSERT(type.IsNested());
 	auto object = yyjson_mut_obj(doc);
 	yyjson_mut_obj_add_strcpy(doc, object, "type", ConvertTypeToAvro(type).c_str());
+	VerifyAvroName(name);
 	yyjson_mut_obj_add_strcpy(doc, object, "name", name.c_str());
 	switch (type.id()) {
 		case LogicalTypeId::STRUCT: {
@@ -75,12 +85,12 @@ static yyjson_mut_val *CreateNestedType(yyjson_mut_doc *doc, const string &name,
 			}
 
 			auto &list_child = ListType::GetChildType(type);
+			auto union_type = yyjson_mut_obj_add_arr(doc, object, "items");
+			yyjson_mut_arr_add_strcpy(doc, union_type, "null");
 			if (list_child.IsNested()) {
-				auto union_type = yyjson_mut_obj_add_arr(doc, object, "items");
-				yyjson_mut_arr_add_strcpy(doc, union_type, "null");
 				yyjson_mut_arr_add_val(union_type, CreateNestedType(doc, "element", list_child));
 			} else {
-				yyjson_mut_obj_add_strcpy(doc, object, "items", ConvertTypeToAvro(list_child).c_str());
+				yyjson_mut_arr_add_strcpy(doc, union_type, ConvertTypeToAvro(list_child).c_str());
 			}
 			break;
 		}
@@ -103,7 +113,7 @@ static yyjson_mut_val *CreateJSONType(yyjson_mut_doc *doc, const string &name, c
 		// }
 		yyjson_mut_obj_add_int(doc, object, "field-id", field_id);
 		if (struct_field) {
-			D_ASSERT(!name.empty());
+			VerifyAvroName(name);
 			yyjson_mut_obj_add_strcpy(doc, object, "name", name.c_str());
 		}
 	} else {
@@ -113,7 +123,7 @@ static yyjson_mut_val *CreateJSONType(yyjson_mut_doc *doc, const string &name, c
 	auto wrapper = yyjson_mut_obj(doc);
 	auto union_type = yyjson_mut_obj_add_arr(doc, wrapper, "type");
 	if (struct_field) {
-		D_ASSERT(!name.empty());
+		VerifyAvroName(name);
 		yyjson_mut_obj_add_strcpy(doc, wrapper, "name", name.c_str());
 	}
 	yyjson_mut_arr_add_strcpy(doc, union_type, "null");
@@ -227,7 +237,8 @@ static void PopulateValue(avro_value_t *target, const Value &val) {
 	auto &type = val.type();
 
 	//! FIXME: add tests for nulls
-	D_ASSERT(avro_value_get_type(target) == AVRO_UNION);
+	auto avro_type = avro_value_get_type(target);
+	D_ASSERT(avro_type == AVRO_UNION);
 	auto union_value = *target;
 	if (val.IsNull()) {
 		avro_value_set_branch(&union_value, 0, target);
@@ -235,7 +246,7 @@ static void PopulateValue(avro_value_t *target, const Value &val) {
 		return;
 	}
 	avro_value_set_branch(&union_value, 1, target);
-	auto avro_type = avro_value_get_type(target);
+	avro_type = avro_value_get_type(target);
 
 	switch (type.id()) {
 		case LogicalTypeId::BOOLEAN: {
