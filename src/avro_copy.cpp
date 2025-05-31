@@ -187,7 +187,7 @@ WriteAvroGlobalState::~WriteAvroGlobalState() {
 }
 
 WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData &bind_data_p, FileSystem &fs, const string &file_path)
-	: allocator(Allocator::Get(context)), memory_buffer(allocator), fs(fs) {
+	: allocator(Allocator::Get(context)), memory_buffer(allocator), datum_buffer(allocator), fs(fs) {
 	handle = fs.OpenFile(file_path, FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW | FileLockType::WRITE_LOCK | FileCompressionType::AUTO_DETECT);
 	auto &bind_data = bind_data_p.Cast<WriteAvroBindData>();
 
@@ -196,12 +196,12 @@ WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData 
 	memory_buffer.Resize(capacity);
 
 	int ret;
+	writer = avro_writer_memory(const_char_ptr_cast(memory_buffer.GetData()), memory_buffer.GetCapacity());
+	datum_writer = avro_writer_memory(const_char_ptr_cast(datum_buffer.GetData()), datum_buffer.GetCapacity());
 	do {
 		//! Create a memory writer to store the header
-		writer = avro_writer_memory(const_char_ptr_cast(memory_buffer.GetData()), memory_buffer.GetCapacity());
-		ret = avro_file_writer_create_from_writer(writer, bind_data.schema, &file_writer);
+		ret = avro_file_writer_create_from_writers(writer, datum_writer, bind_data.schema, &file_writer);
 		if (ret) {
-			avro_writer_free(writer);
 			auto current_capacity = memory_buffer.GetCapacity();
 			memory_buffer.Resize(NextPowerOfTwo(current_capacity * 2));
 		}
@@ -231,9 +231,9 @@ static unique_ptr<GlobalFunctionData> WriteAvroInitializeGlobal(ClientContext &c
 	return res;
 }
 
-static void PopulateValue(avro_value_t *target, const Value &val);
+static idx_t PopulateValue(avro_value_t *target, const Value &val);
 
-static void PopulateValue(avro_value_t *target, const Value &val) {
+static idx_t PopulateValue(avro_value_t *target, const Value &val) {
 	auto &type = val.type();
 
 	//! FIXME: add tests for nulls
@@ -243,7 +243,7 @@ static void PopulateValue(avro_value_t *target, const Value &val) {
 	if (val.IsNull()) {
 		avro_value_set_branch(&union_value, 0, target);
 		avro_value_set_null(target);
-		return;
+		return 1;
 	}
 	avro_value_set_branch(&union_value, 1, target);
 	avro_type = avro_value_get_type(target);
@@ -253,43 +253,43 @@ static void PopulateValue(avro_value_t *target, const Value &val) {
 			D_ASSERT(avro_type == AVRO_BOOLEAN);
 			auto boolean = val.GetValueUnsafe<bool>();
 			avro_value_set_boolean(target, boolean);
-			break;
+			return sizeof(bool);
 		}
 		case LogicalTypeId::BLOB: {
 			D_ASSERT(avro_type == AVRO_BYTES);
 			auto str = val.GetValueUnsafe<string_t>();
 			avro_value_set_bytes(target, (void *)str.GetData(), str.GetSize());
-			break;
+			return str.GetSize();
 		}
 		case LogicalTypeId::DOUBLE: {
 			D_ASSERT(avro_type == AVRO_DOUBLE);
 			auto value = val.GetValueUnsafe<double>();
 			avro_value_set_double(target, value);
-			break;
+			return sizeof(double);
 		}
 		case LogicalTypeId::FLOAT: {
 			D_ASSERT(avro_type == AVRO_FLOAT);
 			auto value = val.GetValueUnsafe<float>();
 			avro_value_set_float(target, value);
-			break;
+			return sizeof(float);
 		}
 		case LogicalTypeId::INTEGER: {
 			D_ASSERT(avro_type == AVRO_INT32);
 			auto integer = val.GetValueUnsafe<int32_t>();
 			avro_value_set_int(target, integer);
-			break;
+			return sizeof(int32_t);
 		}
 		case LogicalTypeId::BIGINT: {
 			D_ASSERT(avro_type == AVRO_INT64);
 			auto bigint = val.GetValueUnsafe<int64_t>();
 			avro_value_set_long(target, bigint);
-			break;
+			return sizeof(int64_t);
 		}
 		case LogicalTypeId::VARCHAR: {
 			D_ASSERT(avro_type == AVRO_STRING);
 			auto str = val.GetValueUnsafe<string_t>();
 			avro_value_set_string_len(target, str.GetData(), str.GetSize() + 1);
-			break;
+			return str.GetSize();
 		}
 		case LogicalTypeId::ENUM: {
 			D_ASSERT(avro_type == AVRO_ENUM);
@@ -300,6 +300,7 @@ static void PopulateValue(avro_value_t *target, const Value &val) {
 		case LogicalTypeId::LIST: {
 			D_ASSERT(avro_type == AVRO_ARRAY);
 			auto &list_values = ListValue::GetChildren(val);
+			idx_t list_value_size = 0;
 			for (idx_t i = 0; i < list_values.size(); i++) {
 				auto &list_value = list_values[i];
 
@@ -309,22 +310,23 @@ static void PopulateValue(avro_value_t *target, const Value &val) {
 					throw InvalidInputException(avro_strerror());
 				}
 
-				PopulateValue(&item, list_value);
+				list_value_size += PopulateValue(&item, list_value);
 			}
-			break;
+			return list_value_size + 1;
 		}
 		case LogicalTypeId::STRUCT: {
 			D_ASSERT(avro_type == AVRO_RECORD);
 			auto &struct_values = StructValue::GetChildren(val);
+			idx_t struct_value_size = 0;
 			for (idx_t i = 0; i < struct_values.size(); i++) {
 				const char *unused_name;
 				avro_value_t field;
 				if (avro_value_get_by_index(target, i, &field, &unused_name)) {
 					throw InvalidInputException(avro_strerror());
 				}
-				PopulateValue(&field, struct_values[i]);
+				struct_value_size += PopulateValue(&field, struct_values[i]);
 			}
-			break;
+			return struct_value_size + 1;
 		}
 		default:
 			throw NotImplementedException("PopulateValue not implemented for type %s", type.ToString());
@@ -335,8 +337,13 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 	auto &global_state = gstate_p.Cast<WriteAvroGlobalState>();
 	auto &local_state = lstate_p.Cast<WriteAvroLocalState>();
 
+	auto &datum_buffer = global_state.datum_buffer;
 	idx_t count = input.size();
+	idx_t offset_in_datum_buffer = 0;
 	for (idx_t i = 0; i < count; i++) {
+
+		//! Populate our avro value, estimating the size of the value as we go
+		idx_t value_size = 0;
 		for (idx_t col_idx = 0; col_idx < input.ColumnCount(); col_idx++) {
 			auto val = input.GetValue(col_idx, i);
 
@@ -345,14 +352,37 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 			if (avro_value_get_by_index(&local_state.value, col_idx, &column, &unused_name)) {
 				throw InvalidInputException(avro_strerror());
 			}
-			PopulateValue(&column, val);
+			value_size += PopulateValue(&column, val);
 		}
-		avro_file_writer_append_value(global_state.file_writer, &local_state.value);
+
+		//! Prepare the datum buffer for this row
+		idx_t length = datum_buffer.GetCapacity() - offset_in_datum_buffer;
+		if (value_size > length) {
+			//! This value is too big to fit into the remaining portion of the buffer
+			idx_t new_capacity = datum_buffer.GetCapacity();
+			new_capacity += value_size;
+			datum_buffer.ResizeAndCopy(NextPowerOfTwo(new_capacity));
+		}
+		const char *datum_writer_buffer = (const char *)datum_buffer.GetData();
+		datum_writer_buffer += offset_in_datum_buffer;
+		avro_writer_memory_set_dest(global_state.datum_writer, datum_writer_buffer, length);
+
+		while (avro_file_writer_append_value(global_state.file_writer, &local_state.value)) {
+			auto current_capacity = datum_buffer.GetCapacity();
+			datum_buffer.ResizeAndCopy(NextPowerOfTwo(current_capacity * 2));
+
+			const char *datum_writer_buffer = (const char *)datum_buffer.GetData();
+			datum_writer_buffer += offset_in_datum_buffer;
+			length = datum_buffer.GetCapacity() - offset_in_datum_buffer;
+			avro_writer_memory_set_dest(global_state.datum_writer, datum_writer_buffer, length);
+		}
+
+		offset_in_datum_buffer += avro_writer_tell(global_state.datum_writer);
 		avro_value_reset(&local_state.value);
 	}
 
 	auto &buffer = global_state.memory_buffer;
-	auto expected_size = avro_file_writer_datum_writer_tell(global_state.file_writer);
+	auto expected_size = avro_writer_tell(global_state.datum_writer);
 	expected_size += 16 + 4;
 	if (expected_size > buffer.GetCapacity()) {
 		//! Resize the buffer in advance, to prevent any need for resizing below

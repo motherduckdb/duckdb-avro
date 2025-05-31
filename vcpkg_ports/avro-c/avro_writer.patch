@@ -1,5 +1,5 @@
 diff --git a/lang/c/src/avro/io.h b/lang/c/src/avro/io.h
-index ffbb68dc5..ef1af202c 100644
+index ffbb68dc5..7f5ddd191 100644
 --- a/lang/c/src/avro/io.h
 +++ b/lang/c/src/avro/io.h
 @@ -52,6 +52,7 @@ avro_reader_memory_set_source(avro_reader_t reader, const char *buf, int64_t len
@@ -10,39 +10,37 @@ index ffbb68dc5..ef1af202c 100644
  int avro_read(avro_reader_t reader, void *buf, int64_t len);
  int avro_skip(avro_reader_t reader, int64_t len);
  int avro_write(avro_writer_t writer, void *buf, int64_t len);
-@@ -109,6 +110,7 @@ int avro_file_writer_create_with_codec(const char *path,
+@@ -60,6 +61,8 @@ void avro_reader_reset(avro_reader_t reader);
+ 
+ void avro_writer_reset(avro_writer_t writer);
+ int64_t avro_writer_tell(avro_writer_t writer);
++const char *avro_writer_buf(avro_writer_t writer);
++
+ void avro_writer_flush(avro_writer_t writer);
+ 
+ void avro_writer_dump(avro_writer_t writer, FILE * fp);
+@@ -109,6 +112,7 @@ int avro_file_writer_create_with_codec(const char *path,
  int avro_file_writer_create_with_codec_fp(FILE *fp, const char *path, int should_close,
  				avro_schema_t schema, avro_file_writer_t * writer,
  				const char *codec, size_t block_size);
-+int avro_file_writer_create_from_writer(avro_writer_t writer_in, avro_schema_t schema, avro_file_writer_t * writer);
++int avro_file_writer_create_from_writers(avro_writer_t writer_in, avro_writer_t datum_writer_in, avro_schema_t schema, avro_file_writer_t * writer);
  int avro_file_writer_open(const char *path, avro_file_writer_t * writer);
  int avro_file_writer_open_bs(const char *path, avro_file_writer_t * writer, size_t block_size);
  int avro_file_reader(const char *path, avro_file_reader_t * reader);
-@@ -118,6 +120,8 @@ int avro_file_reader_fp(FILE *fp, const char *path, int should_close,
- avro_schema_t
- avro_file_reader_get_writer_schema(avro_file_reader_t reader);
- 
-+int64_t avro_file_writer_datum_writer_tell(avro_file_writer_t writer);
-+
- int avro_file_writer_sync(avro_file_writer_t writer);
- int avro_file_writer_flush(avro_file_writer_t writer);
- int avro_file_writer_close(avro_file_writer_t writer);
 diff --git a/lang/c/src/datafile.c b/lang/c/src/datafile.c
-index c9d4dfeb6..8f14f4656 100644
+index c9d4dfeb6..6795ff06a 100644
 --- a/lang/c/src/datafile.c
 +++ b/lang/c/src/datafile.c
-@@ -238,6 +238,59 @@ int avro_file_writer_create_with_codec_fp(FILE *fp, const char *path, int should
+@@ -238,6 +238,43 @@ int avro_file_writer_create_with_codec_fp(FILE *fp, const char *path, int should
  	return 0;
  }
  
-+int avro_file_writer_create_from_writer(avro_writer_t writer_in, avro_schema_t schema, avro_file_writer_t * writer)
++int avro_file_writer_create_from_writers(avro_writer_t writer_in, avro_writer_t datum_writer_in, avro_schema_t schema, avro_file_writer_t * writer)
 +{
 +	avro_file_writer_t w;
 +	int rval;
 +	check_param(EINVAL, is_avro_schema(schema), "schema");
 +	check_param(EINVAL, writer, "writer");
-+
-+	size_t block_size = DEFAULT_BLOCK_SIZE;
 +
 +	w = (avro_file_writer_t) avro_new(struct avro_file_writer_t_);
 +	if (!w) {
@@ -56,7 +54,7 @@ index c9d4dfeb6..8f14f4656 100644
 +		avro_freet(struct avro_file_writer_t_, w);
 +		return ENOMEM;
 +	}
-+	rval = avro_codec(w->codec, "null");
++	rval = avro_codec(w->codec, NULL);
 +	if (rval) {
 +		avro_codec_reset(w->codec);
 +		avro_freet(struct avro_codec_t_, w->codec);
@@ -66,23 +64,9 @@ index c9d4dfeb6..8f14f4656 100644
 +	w->writer = writer_in;
 +	*writer = w;
 +
-+	w->datum_buffer_size = block_size;
-+	w->datum_buffer = (char *) avro_malloc(w->datum_buffer_size);
-+
-+	if(!w->datum_buffer) {
-+		avro_set_error("Could not allocate datum buffer\n");
-+		avro_writer_free(w->writer);
-+		return ENOMEM;
-+	}
-+
-+	w->datum_writer =
-+	    avro_writer_memory(w->datum_buffer, w->datum_buffer_size);
-+	if (!w->datum_writer) {
-+		avro_set_error("Cannot create datum writer from memory writer");
-+		avro_writer_free(w->writer);
-+		avro_free(w->datum_buffer, w->datum_buffer_size);
-+		return ENOMEM;
-+	}
++	w->datum_buffer_size = 0;
++	w->datum_buffer = NULL;
++	w->datum_writer = datum_writer_in;
 +
 +	w->writers_schema = avro_schema_incref(schema);
 +	return write_header(w);
@@ -91,14 +75,31 @@ index c9d4dfeb6..8f14f4656 100644
  static int file_read_header(avro_reader_t reader,
  			    avro_schema_t * writers_schema, avro_codec_t codec,
  			    char *sync, int synclen)
-@@ -658,6 +711,10 @@ avro_file_writer_append_encoded(avro_file_writer_t w,
- 	return 0;
+@@ -570,7 +607,7 @@ static int file_write_block(avro_file_writer_t w)
+ 		check_prefix(rval, enc->write_long(w->writer, w->block_count),
+ 			     "Cannot write file block count: ");
+ 		/* Encode the block */
+-		check_prefix(rval, avro_codec_encode(w->codec, w->datum_buffer, w->block_size),
++		check_prefix(rval, avro_codec_encode(w->codec, avro_writer_buf(w->datum_writer), w->block_size),
+ 			     "Cannot encode file block: ");
+ 		/* Write the block length */
+ 		check_prefix(rval, enc->write_long(w->writer, w->codec->used_size),
+diff --git a/lang/c/src/io.c b/lang/c/src/io.c
+index c1e2f5dc9..2f01e3f65 100644
+--- a/lang/c/src/io.c
++++ b/lang/c/src/io.c
+@@ -388,6 +388,14 @@ int64_t avro_writer_tell(avro_writer_t writer)
+ 	return EINVAL;
  }
  
-+int64_t avro_file_writer_datum_writer_tell(avro_file_writer_t writer) {
-+	return avro_writer_tell(writer->datum_writer);
++const char *avro_writer_buf(avro_writer_t writer)
++{
++	if (is_memory_io(writer)) {
++		return avro_writer_to_memory(writer)->buf;
++	}
++	return NULL;
 +}
 +
- int avro_file_writer_sync(avro_file_writer_t w)
+ void avro_writer_flush(avro_writer_t writer)
  {
- 	return file_write_block(w);
+ 	if (is_file_io(writer)) {

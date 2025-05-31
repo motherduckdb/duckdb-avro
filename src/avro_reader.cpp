@@ -126,11 +126,11 @@ AvroReader::AvroReader(ClientContext &context, string filename_p) : BaseFileRead
 	}
 
 	auto caching_file_handle = caching_file_system.OpenFile(this->file.path, FileOpenFlags::FILE_FLAGS_READ);
-	allocated_data = Allocator::Get(context).Allocate(caching_file_handle->GetFileSize());
-	auto total_size = allocated_data.GetSize();
-	auto data = allocated_data.get();
+	auto total_size = caching_file_handle->GetFileSize();
+	total_size += 16 + 4;
+	data_ptr_t data = nullptr;
 
-	auto buf_handle = caching_file_handle->Read(data, total_size);
+	buf_handle = caching_file_handle->Read(data, total_size);
 	auto buffer_data = buf_handle.Ptr();
 
 	D_ASSERT(buf_handle.IsValid());

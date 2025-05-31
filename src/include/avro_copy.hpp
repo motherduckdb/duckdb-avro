@@ -59,6 +59,15 @@ public:
 		}
 		Allocate(new_capacity);
 	}
+	void ResizeAndCopy(idx_t new_capacity) {
+		data_ptr_t old_data = data;
+		auto old_capacity = capacity;
+
+		data = nullptr;
+		Allocate(new_capacity);
+		memcpy(data, old_data, old_capacity);
+		allocator.FreeData(old_data, old_capacity);
+	}
 	data_ptr_t GetData() {
 		return data;
 	}
@@ -80,6 +89,7 @@ public:
 struct WriteAvroGlobalState : public GlobalFunctionData {
 public:
 	static constexpr idx_t BUFFER_SIZE = 1024;
+	static constexpr idx_t DATUM_BUFFER_SIZE = 16 * 1024;
 public:
 	WriteAvroGlobalState(ClientContext &context, FunctionData &bind_data_p, FileSystem &fs, const string &file_path);
 	virtual ~WriteAvroGlobalState();
@@ -96,6 +106,7 @@ public:
 public:
 	Allocator &allocator;
 	AvroInMemoryBuffer memory_buffer;
+	AvroInMemoryBuffer datum_buffer;
 	FileSystem &fs;
 	//! The mutex for writing to the physical file
 	mutex lock;
@@ -104,6 +115,7 @@ public:
 
 	//! The writer for the file
 	avro_writer_t writer;
+	avro_writer_t datum_writer;
 	avro_file_writer_t file_writer;
 	//! The interface through which new avro values are created
 	avro_value_iface_t *interface = nullptr;
