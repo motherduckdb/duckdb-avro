@@ -13,3 +13,16 @@ COPY (
 ) TO '__TEST_DIR__/tmp.avro';
 ----
 Binder Error: Avro schema by the name of 'child' already exists, all names in the entire avro schema have to be unique
+
+# The ROOT_NAME (top level record) is not subject to this limitation
+statement ok
+COPY (
+	select {
+		'a': 21
+	} structure
+) TO '__TEST_DIR__/tmp2.avro' ( ROOT_NAME 'a');
+
+query I
+select * from read_avro('__TEST_DIR__/tmp2.avro');
+----
+{'a': 21}
