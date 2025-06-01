@@ -319,7 +319,6 @@ static idx_t PopulateValue(avro_value_t *target, const Value &val);
 static idx_t PopulateValue(avro_value_t *target, const Value &val) {
 	auto &type = val.type();
 
-	//! FIXME: add tests for nulls
 	auto avro_type = avro_value_get_type(target);
 	D_ASSERT(avro_type == AVRO_UNION);
 	auto union_value = *target;
