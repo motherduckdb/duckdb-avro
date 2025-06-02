@@ -3,19 +3,19 @@
 		"avro-c"
 	],
 	"vcpkg-configuration": {
+		"overlay-ports": [
+			"./vcpkg_ports"
+		],
 		"registries": [
 			{
 				"kind": "git",
-				"baseline": "c4fea45cc8291fc81fca95e8b21df8f10befb677",
-				"repository": "https://github.com/Tishj/vcpkg-duckdb-ports",
+				"baseline": "8f4167a54c92f1754c86fbce4009ab51cf585210",
+				"repository": "https://github.com/duckdb/vcpkg-duckdb-ports",
 				"packages": [
 					"vcpkg-cmake",
 					"avro-c"
 				]
 			}
-		],
-		"overlay-ports": [
-			"./vcpkg_ports"
 		]
 	},
 	"builtin-baseline": "5e5d0e1cd7785623065e77eff011afdeec1a3574"
