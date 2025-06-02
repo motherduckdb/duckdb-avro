@@ -6,7 +6,7 @@
 		"registries": [
 			{
 				"kind": "git",
-				"baseline": "0533be2aaef2e2db6bb8b0724c4f289394881959",
+				"baseline": "c4fea45cc8291fc81fca95e8b21df8f10befb677",
 				"repository": "https://github.com/Tishj/vcpkg-duckdb-ports",
 				"packages": [
 					"vcpkg-cmake",
