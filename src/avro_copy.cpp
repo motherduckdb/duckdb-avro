@@ -319,8 +319,6 @@ static idx_t PopulateValue(avro_value_t *target, const Value &val);
 static idx_t PopulateValue(avro_value_t *target, const Value &val) {
 	auto &type = val.type();
 
-	auto avro_type = avro_value_get_type(target);
-	D_ASSERT(avro_type == AVRO_UNION);
 	auto union_value = *target;
 	if (val.IsNull()) {
 		avro_value_set_branch(&union_value, 0, target);
@@ -328,59 +326,49 @@ static idx_t PopulateValue(avro_value_t *target, const Value &val) {
 		return 1;
 	}
 	avro_value_set_branch(&union_value, 1, target);
-	avro_type = avro_value_get_type(target);
 
 	switch (type.id()) {
 	case LogicalTypeId::BOOLEAN: {
-		D_ASSERT(avro_type == AVRO_BOOLEAN);
 		auto boolean = val.GetValueUnsafe<bool>();
 		avro_value_set_boolean(target, boolean);
 		return sizeof(bool);
 	}
 	case LogicalTypeId::BLOB: {
-		D_ASSERT(avro_type == AVRO_BYTES);
 		auto str = val.GetValueUnsafe<string_t>();
 		avro_value_set_bytes(target, (void *)str.GetData(), str.GetSize());
 		return str.GetSize();
 	}
 	case LogicalTypeId::DOUBLE: {
-		D_ASSERT(avro_type == AVRO_DOUBLE);
 		auto value = val.GetValueUnsafe<double>();
 		avro_value_set_double(target, value);
 		return sizeof(double);
 	}
 	case LogicalTypeId::FLOAT: {
-		D_ASSERT(avro_type == AVRO_FLOAT);
 		auto value = val.GetValueUnsafe<float>();
 		avro_value_set_float(target, value);
 		return sizeof(float);
 	}
 	case LogicalTypeId::INTEGER: {
-		D_ASSERT(avro_type == AVRO_INT32);
 		auto integer = val.GetValueUnsafe<int32_t>();
 		avro_value_set_int(target, integer);
 		return sizeof(int32_t);
 	}
 	case LogicalTypeId::BIGINT: {
-		D_ASSERT(avro_type == AVRO_INT64);
 		auto bigint = val.GetValueUnsafe<int64_t>();
 		avro_value_set_long(target, bigint);
 		return sizeof(int64_t);
 	}
 	case LogicalTypeId::VARCHAR: {
-		D_ASSERT(avro_type == AVRO_STRING);
 		auto str = val.GetValueUnsafe<string_t>();
 		avro_value_set_string_len(target, str.GetData(), str.GetSize() + 1);
 		return str.GetSize();
 	}
 	case LogicalTypeId::ENUM: {
-		D_ASSERT(avro_type == AVRO_ENUM);
 		//! TODO: add support for ENUM
 		throw NotImplementedException("Can't convert ENUM Value (%s) to Avro yet", val.ToString());
 	}
 	case LogicalTypeId::MAP:
 	case LogicalTypeId::LIST: {
-		D_ASSERT(avro_type == AVRO_ARRAY);
 		auto &list_values = ListValue::GetChildren(val);
 		idx_t list_value_size = 0;
 		for (idx_t i = 0; i < list_values.size(); i++) {
@@ -397,7 +385,6 @@ static idx_t PopulateValue(avro_value_t *target, const Value &val) {
 		return list_value_size + 1;
 	}
 	case LogicalTypeId::STRUCT: {
-		D_ASSERT(avro_type == AVRO_RECORD);
 		auto &struct_values = StructValue::GetChildren(val);
 		idx_t struct_value_size = 0;
 		for (idx_t i = 0; i < struct_values.size(); i++) {
