@@ -1,6 +1,6 @@
 require avro
 
-statement error
+statement ok
 COPY (
 	select {
 		'a': {
@@ -11,8 +11,11 @@ COPY (
 		}
 	} my_struct
 ) TO '__TEST_DIR__/tmp.avro';
+
+query I
+select * from read_avro('__TEST_DIR__/tmp.avro');
 ----
-Binder Error: Avro schema by the name of 'child' already exists, all names in the entire avro schema have to be unique
+{'a': {'child': 21}, 'b': {'child': true}}
 
 # The ROOT_NAME (top level record) is not subject to this limitation
 statement ok
@@ -28,3 +31,21 @@ query I
 select * from read_avro('__TEST_DIR__/tmp2.avro');
 ----
 {'a': {'field': true}}
+
+# The first column, 'a' is a STRUCT
+# The second column ('b') contains a field 'a', which is also a STRUCT
+statement error
+COPY (
+	select {
+		'a': {
+			'field': true
+		},
+		'b': {
+			'a': {
+				'hello': false
+			}
+		}
+	} structure
+) TO '__TEST_DIR__/tmp3.avro';
+----
+Binder Error: Avro schema by the name of 'a' already exists, names of 'record', 'enum' and 'fixed' types have to be distinct

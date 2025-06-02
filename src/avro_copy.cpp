@@ -81,7 +81,7 @@ public:
 	}
 	void ParseRootName(const case_insensitive_map_t<vector<Value>> &options) {
 		auto it = options.find("ROOT_NAME");
-		if (it != options.end()) {
+		if (it == options.end()) {
 			return;
 		}
 		auto &value = it->second[0];
@@ -108,7 +108,7 @@ public:
 		auto res = named_schemas.insert(name);
 		if (!res.second) {
 			throw BinderException(
-			    "Avro schema by the name of '%s' already exists, all names in the entire avro schema have to be unique",
+			    "Avro schema by the name of '%s' already exists, names of 'record', 'enum' and 'fixed' types have to be distinct",
 			    name);
 		}
 	}
