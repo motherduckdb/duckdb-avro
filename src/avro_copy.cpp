@@ -5,6 +5,7 @@
 #include "duckdb/function/function.hpp"
 #include "yyjson.hpp"
 #include "duckdb/common/printer.hpp"
+#include "field_ids.hpp"
 
 using namespace duckdb_yyjson; // NOLINT
 
@@ -44,61 +45,25 @@ static string ConvertTypeToAvro(const LogicalType &type) {
 	//! FIXME: we don't have support for 'FIXED' currently (a fixed size blob)
 }
 
-struct AvroCopyInput {
-public:
-	AvroCopyInput(CopyFunctionBindInput &input) {
-		auto &options = input.info.options;
-
-		ParseFieldIds(options);
-		ParseRootName(options);
+static bool IsNamedSchema(const LogicalType &type) {
+	switch (type.id()) {
+	//! NOTE: 'fixed' is also part of this, but we don't have that type in DuckDB
+	case LogicalTypeId::STRUCT:
+	case LogicalTypeId::ENUM:
+		return true;
+	default:
+		return false;
 	}
-private:
-	void ParseFieldIds(const case_insensitive_map_t<vector<Value>> &options) {
-		auto it = options.find("FIELD_IDS");
-		if (it != options.end()) {
-			auto &value = it->second[0];
-			if (value.type().id() != LogicalTypeId::MAP) {
-				throw InvalidInputException("'FIELD_IDS' is expected to be provided as a MAP(VARCHAR, INT), a mapping of schema name to field id");
-			}
-			auto &items = MapValue::GetChildren(value);
-			auto &key_type = MapType::KeyType(value.type());
-			auto &value_type = MapType::ValueType(value.type());
-			if (key_type.id() != LogicalTypeId::VARCHAR) {
-				throw InvalidInputException("Map keys should be VARCHAR, the schema name");
-			}
-			if (value_type.id() != LogicalTypeId::INTEGER) {
-				throw InvalidInputException("Map values should be INTEGER, the field id");
-			}
-			for (auto &item : items) {
-				auto &key_value = StructValue::GetChildren(item);
-				field_ids.emplace(key_value[0].GetValue<string>(), key_value[1].GetValue<int32_t>());
-			}
-		}
-	}
-	void ParseRootName(const case_insensitive_map_t<vector<Value>> &options) {
-		auto it = options.find("ROOT_NAME");
-		if (it != options.end()) {
-			auto &value = it->second[0];
-			if (value.type().id() != LogicalTypeId::VARCHAR) {
-				throw InvalidInputException("'ROOT_NAME' is expected to be provided as VARCHAR, this is used for the name of the top level 'record'");
-			}
-			root_name = value.GetValue<string>();
-		}
-	}
-public:
-	string root_name = "root";
-	unordered_map<string, int32_t> field_ids;
-};
+}
 
 struct JSONSchemaGenerator {
 public:
-	JSONSchemaGenerator(const AvroCopyInput &input) : input(input) {
+	JSONSchemaGenerator(const vector<string> &names, const vector<LogicalType> &types) : names(names), types(types) {
 		doc = yyjson_mut_doc_new(nullptr);
 		root_object = yyjson_mut_obj(doc);
 		yyjson_mut_doc_set_root(doc, root_object);
 		yyjson_mut_obj_add_str(doc, root_object, "type", "record");
-		//! TODO: get this name from the bind input
-		yyjson_mut_obj_add_strcpy(doc, root_object, "name", input.root_name.c_str());
+		yyjson_mut_obj_add_strcpy(doc, root_object, "name", root_name.c_str());
 	}
 	~JSONSchemaGenerator() {
 		if (doc) {
@@ -107,18 +72,44 @@ public:
 	}
 
 public:
-	void VerifyAvroName(const string &name) {
+	void ParseFieldIds(const case_insensitive_map_t<vector<Value>> &options) {
+		auto it = options.find("FIELD_IDS");
+		if (it == options.end()) {
+			return;
+		}
+		avro::FieldIDUtils::ParseFieldIds(it->second[0], names, types);
+	}
+	void ParseRootName(const case_insensitive_map_t<vector<Value>> &options) {
+		auto it = options.find("ROOT_NAME");
+		if (it != options.end()) {
+			return;
+		}
+		auto &value = it->second[0];
+		if (value.type().id() != LogicalTypeId::VARCHAR) {
+			throw InvalidInputException("'ROOT_NAME' is expected to be provided as VARCHAR, this is used for the name "
+			                            "of the top level 'record'");
+		}
+		root_name = value.GetValue<string>();
+	}
+
+public:
+	void VerifyAvroName(const string &name, const LogicalType &type) {
 		D_ASSERT(!name.empty());
 		for (idx_t i = 0; i < name.size(); i++) {
 			if (!(isalpha(name[i]) || name[i] == '_' || (i && isdigit(name[i])))) {
-				throw InvalidInputException(
-					"'%s' is not a valid Avro identifier\nThe identifier has to match the regex: [A-Za-z_][A-Za-z0-9_]*",
-					name);
+				throw InvalidInputException("'%s' is not a valid Avro identifier\nThe identifier has to match the "
+				                            "regex: [A-Za-z_][A-Za-z0-9_]*",
+				                            name);
 			}
+		}
+		if (!IsNamedSchema(type)) {
+			return;
 		}
 		auto res = named_schemas.insert(name);
 		if (!res.second) {
-			throw BinderException("Avro schema by the name of '%s' already exists, all names in the entire avro schema have to be unique", name);
+			throw BinderException(
+			    "Avro schema by the name of '%s' already exists, all names in the entire avro schema have to be unique",
+			    name);
 		}
 	}
 
@@ -135,12 +126,12 @@ public:
 			//    "type": "bool"
 			//    < additional fields >
 			// }
-			auto it = input.field_ids.find(name);
-			if (it != input.field_ids.end()) {
-				yyjson_mut_obj_add_int(doc, object, "field-id", it->second);
+			auto it = field_ids.find(name);
+			if (it != field_ids.end()) {
+				yyjson_mut_obj_add_int(doc, object, "field-id", it->second.GetFieldId());
 			}
 			if (struct_field) {
-				VerifyAvroName(name);
+				VerifyAvroName(name, type);
 				yyjson_mut_obj_add_strcpy(doc, object, "name", name.c_str());
 			}
 		} else {
@@ -161,7 +152,7 @@ public:
 		D_ASSERT(type.IsNested());
 		auto object = yyjson_mut_obj(doc);
 		yyjson_mut_obj_add_strcpy(doc, object, "type", ConvertTypeToAvro(type).c_str());
-		VerifyAvroName(name);
+		VerifyAvroName(name, type);
 		yyjson_mut_obj_add_strcpy(doc, object, "name", name.c_str());
 		switch (type.id()) {
 		case LogicalTypeId::STRUCT: {
@@ -177,9 +168,9 @@ public:
 		case LogicalTypeId::MAP:
 		case LogicalTypeId::LIST: {
 			if (type.id() == LogicalTypeId::LIST) {
-				auto it = input.field_ids.find(name);
-				if (it != input.field_ids.end()) {
-					yyjson_mut_obj_add_int(doc, object, "element-id", it->second);
+				auto it = field_ids.find(name);
+				if (it != field_ids.end()) {
+					yyjson_mut_obj_add_int(doc, object, "element-id", it->second.GetFieldId());
 				}
 			} else {
 				D_ASSERT(type.id() == LogicalTypeId::MAP);
@@ -202,7 +193,7 @@ public:
 		return object;
 	}
 
-	string GenerateJSON(const vector<string> &names, const vector<LogicalType> &types) {
+	string GenerateJSON() {
 		auto array = yyjson_mut_obj_add_arr(doc, root_object, "fields");
 
 		//! Add all the fields
@@ -225,23 +216,32 @@ public:
 	}
 
 public:
-	const AvroCopyInput &input;
+	const vector<string> &names;
+	const vector<LogicalType> &types;
+
+	string root_name = "root";
+	case_insensitive_map_t<avro::FieldID> field_ids;
 	idx_t generated_name_id = 0;
 	yyjson_mut_doc *doc = nullptr;
 	yyjson_mut_val *root_object;
 	unordered_set<string> named_schemas;
 };
 
-static string CreateJSONSchema(const AvroCopyInput &input, const vector<string> &names, const vector<LogicalType> &types) {
-	JSONSchemaGenerator state(input);
-	return state.GenerateJSON(names, types);
+static string CreateJSONSchema(const case_insensitive_map_t<vector<Value>> &options, const vector<string> &names,
+                               const vector<LogicalType> &types) {
+	JSONSchemaGenerator state(names, types);
+
+	state.ParseFieldIds(options);
+	state.ParseRootName(options);
+
+	return state.GenerateJSON();
 }
 
-WriteAvroBindData::WriteAvroBindData(CopyFunctionBindInput &input, const vector<string> &names, const vector<LogicalType> &types)
+WriteAvroBindData::WriteAvroBindData(CopyFunctionBindInput &input, const vector<string> &names,
+                                     const vector<LogicalType> &types)
     : names(names), types(types) {
 
-	AvroCopyInput avro_copy_input(input);
-	json_schema = CreateJSONSchema(avro_copy_input, names, types);
+	json_schema = CreateJSONSchema(input.info.options, names, types);
 	if (avro_schema_from_json_length(json_schema.c_str(), json_schema.size(), &schema)) {
 		throw InvalidInputException(avro_strerror());
 	}

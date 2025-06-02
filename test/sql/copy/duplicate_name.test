@@ -18,11 +18,13 @@ Binder Error: Avro schema by the name of 'child' already exists, all names in th
 statement ok
 COPY (
 	select {
-		'a': 21
+		'a': {
+			'field': true
+		}
 	} structure
 ) TO '__TEST_DIR__/tmp2.avro' ( ROOT_NAME 'a');
 
 query I
 select * from read_avro('__TEST_DIR__/tmp2.avro');
 ----
-{'a': 21}
+{'a': {'field': true}}
