@@ -118,6 +118,10 @@ struct WriteAvroGlobalState : public GlobalFunctionData {
 public:
 	static constexpr idx_t BUFFER_SIZE = 1024;
 	static constexpr idx_t DATUM_BUFFER_SIZE = 16 * 1024;
+	//! Size of the bytes written to mark the end of a section (header/datablock)
+	static constexpr idx_t SYNC_SIZE = 16;
+	//! Avro uses a handrolled varint that they assert can only be 10 bytes
+	static constexpr idx_t MAX_ROW_COUNT_BYTES = 10;
 
 public:
 	WriteAvroGlobalState(ClientContext &context, FunctionData &bind_data_p, FileSystem &fs, const string &file_path);

@@ -276,7 +276,7 @@ WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData 
 	auto &bind_data = bind_data_p.Cast<WriteAvroBindData>();
 
 	//! Guess how big the "header" of the Avro file needs to be
-	idx_t capacity = MaxValue<idx_t>(BUFFER_SIZE, NextPowerOfTwo(bind_data.json_schema.size() + 16 + 4));
+	idx_t capacity = MaxValue<idx_t>(BUFFER_SIZE, NextPowerOfTwo(bind_data.json_schema.size() + SYNC_SIZE + MAX_ROW_COUNT_BYTES));
 	memory_buffer.Resize(capacity);
 
 	int ret;
@@ -448,7 +448,7 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 
 	auto &buffer = global_state.memory_buffer;
 	auto expected_size = avro_writer_tell(global_state.datum_writer);
-	expected_size += 16 + 4;
+	expected_size += WriteAvroGlobalState::SYNC_SIZE + WriteAvroGlobalState::MAX_ROW_COUNT_BYTES;
 	if (expected_size > buffer.GetCapacity()) {
 		//! Resize the buffer in advance, to prevent any need for resizing below
 		buffer.Resize(NextPowerOfTwo(expected_size));

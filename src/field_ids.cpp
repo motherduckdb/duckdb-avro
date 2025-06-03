@@ -40,30 +40,6 @@ static case_insensitive_map_t<LogicalType> GetChildNameToTypeMap(const LogicalTy
 	return name_to_type_map;
 }
 
-static void GetChildNamesAndTypes(const LogicalType &type, vector<string> &child_names,
-                                  vector<LogicalType> &child_types) {
-	switch (type.id()) {
-	case LogicalTypeId::LIST:
-		child_names.emplace_back("element");
-		child_types.emplace_back(ListType::GetChildType(type));
-		break;
-	case LogicalTypeId::MAP:
-		child_names.emplace_back("key");
-		child_names.emplace_back("value");
-		child_types.emplace_back(MapType::KeyType(type));
-		child_types.emplace_back(MapType::ValueType(type));
-		break;
-	case LogicalTypeId::STRUCT:
-		for (auto &child_type : StructType::GetChildTypes(type)) {
-			child_names.emplace_back(child_type.first);
-			child_types.emplace_back(child_type.second);
-		}
-		break;
-	default: // LCOV_EXCL_START
-		throw InternalException("Unexpected type in GetChildNamesAndTypes");
-	} // LCOV_EXCL_STOP
-}
-
 static void GetFieldIDs(const Value &field_ids_value, case_insensitive_map_t<FieldID> &field_ids,
                         unordered_set<uint32_t> &unique_field_ids,
                         const case_insensitive_map_t<LogicalType> &name_to_type_map) {
