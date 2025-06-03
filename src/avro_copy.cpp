@@ -6,6 +6,7 @@
 #include "yyjson.hpp"
 #include "duckdb/common/printer.hpp"
 #include "field_ids.hpp"
+#include "errno.h"
 
 using namespace duckdb_yyjson; // NOLINT
 
@@ -282,14 +283,13 @@ WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData 
 	int ret;
 	writer = avro_writer_memory(const_char_ptr_cast(memory_buffer.GetData()), memory_buffer.GetCapacity());
 	datum_writer = avro_writer_memory(const_char_ptr_cast(datum_buffer.GetData()), datum_buffer.GetCapacity());
-	do {
-		//! Create a memory writer to store the header
-		ret = avro_file_writer_create_from_writers(writer, datum_writer, bind_data.schema, &file_writer);
-		if (ret) {
-			auto current_capacity = memory_buffer.GetCapacity();
-			memory_buffer.Resize(NextPowerOfTwo(current_capacity * 2));
-		}
-	} while (ret);
+	while ((ret = avro_file_writer_create_from_writers(writer, datum_writer, bind_data.schema, &file_writer)) == ENOSPC) {
+		auto current_capacity = memory_buffer.GetCapacity();
+		memory_buffer.Resize(NextPowerOfTwo(current_capacity * 2));
+	}
+	if (ret) {
+		throw InvalidInputException(avro_strerror());
+	}
 
 	auto written_bytes = avro_writer_tell(writer);
 	WriteData(memory_buffer.GetData(), written_bytes);
@@ -435,11 +435,15 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 		avro_writer_memory_set_dest_with_offset(global_state.datum_writer, (const char *)datum_buffer.GetData(),
 		                                        datum_buffer.GetCapacity(), offset_in_datum_buffer);
 
-		while (avro_file_writer_append_value(global_state.file_writer, &local_state.value)) {
+		int ret;
+		while ((ret = avro_file_writer_append_value(global_state.file_writer, &local_state.value)) == ENOSPC) {
 			auto current_capacity = datum_buffer.GetCapacity();
 			datum_buffer.ResizeAndCopy(NextPowerOfTwo(current_capacity * 2));
 			avro_writer_memory_set_dest_with_offset(global_state.datum_writer, (const char *)datum_buffer.GetData(),
 			                                        datum_buffer.GetCapacity(), offset_in_datum_buffer);
+		}
+		if (ret) {
+			throw InvalidInputException(avro_strerror());
 		}
 
 		offset_in_datum_buffer = avro_writer_tell(global_state.datum_writer);
@@ -456,10 +460,14 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 	}
 
 	//! Flush the contents to the buffer, if it fails, resize the buffer and try again
-	while (avro_file_writer_flush(global_state.file_writer)) {
+	int ret;
+	while ((ret = avro_file_writer_flush(global_state.file_writer)) == ENOSPC) {
 		auto current_capacity = buffer.GetCapacity();
 		buffer.Resize(NextPowerOfTwo(current_capacity * 2));
 		avro_writer_memory_set_dest(global_state.writer, (const char *)buffer.GetData(), buffer.GetCapacity());
+	}
+	if (ret) {
+		throw InvalidInputException(avro_strerror());
 	}
 
 	auto written_bytes = avro_writer_tell(global_state.writer);
