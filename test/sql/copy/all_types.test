@@ -1,0 +1,57 @@
+require avro
+
+statement ok
+create view vw as select
+	'this is not an inlined string' "field_string",
+	'\x12\x13\x14\xaf\xa1\x20\x34'::BLOB "field_bytes",
+	2147483647 "field_int",
+	9223372036854775807 "field_long",
+	1.23::FLOAT "field_float",
+	3.141592653589793::DOUBLE "field_double",
+	true "field_boolean",
+	NULL "field_null",
+	MAP {
+		21: 'abc',
+		42: 'test'
+	} "field_map",
+	[
+		'a',
+		'b',
+		'c'
+	] "field_list",
+	{
+		'a': 21,
+		'b': True,
+		'c': 1.234::FLOAT
+	} "field_struct"
+;
+
+statement ok
+COPY (
+	select * from vw
+) TO '__TEST_DIR__/all_types.avro';
+
+query I nosort basic
+select * from vw;
+----
+
+query I nosort basic
+select * from read_avro('__TEST_DIR__/all_types.avro')
+----
+
+statement ok
+CREATE TYPE my_enum AS ENUM ('a', 'abc', 'decently long enum value');
+
+statement error
+COPY (
+	select 'decently long enum value'::my_enum a
+) TO '__TEST_DIR__/enum_type.avro';
+----
+Not implemented Error: Can't convert logical type 'ENUM('a', 'abc', 'decently long enum value')' to Avro type
+
+statement error
+COPY (
+	select union_value(b := 'abc')::UNION(a INTEGER, b VARCHAR, c FLOAT) a
+) TO '__TEST_DIR__/union_type.avro';
+----
+Not implemented Error: Can't convert logical type 'UNION(a INTEGER, b VARCHAR, c FLOAT)' to Avro type

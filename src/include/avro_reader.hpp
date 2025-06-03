@@ -32,7 +32,7 @@ public:
 	avro_value_t value;
 	unique_ptr<Vector> read_vec;
 
-	AllocatedData allocated_data;
+	BufferHandle buf_handle;
 	AvroType avro_type;
 	LogicalType duckdb_type;
 };
