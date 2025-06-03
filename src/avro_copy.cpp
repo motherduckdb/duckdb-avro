@@ -32,7 +32,8 @@ static string ConvertTypeToAvro(const LogicalType &type) {
 	case LogicalTypeId::STRUCT:
 		return "record";
 	case LogicalTypeId::ENUM:
-		return "enum";
+		//! FIXME: this should be implemented at some point
+		throw NotImplementedException("Can't convert logical type '%s' to Avro type", type.ToString());
 	case LogicalTypeId::LIST:
 		return "array";
 	case LogicalTypeId::MAP:
@@ -107,9 +108,9 @@ public:
 		}
 		auto res = named_schemas.insert(name);
 		if (!res.second) {
-			throw BinderException(
-			    "Avro schema by the name of '%s' already exists, names of 'record', 'enum' and 'fixed' types have to be distinct",
-			    name);
+			throw BinderException("Avro schema by the name of '%s' already exists, names of 'record', 'enum' and "
+			                      "'fixed' types have to be distinct",
+			                      name);
 		}
 	}
 
