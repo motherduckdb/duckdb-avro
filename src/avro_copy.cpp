@@ -245,16 +245,17 @@ WriteAvroBindData::WriteAvroBindData(CopyFunctionBindInput &input, const vector<
 	if (avro_schema_from_json_length(json_schema.c_str(), json_schema.size(), &schema)) {
 		throw InvalidInputException(avro_strerror());
 	}
+	interface = avro_generic_class_from_schema(schema);
 }
 
 WriteAvroBindData::~WriteAvroBindData() {
 	avro_schema_decref(schema);
+	avro_value_iface_decref(interface);
 }
 
 WriteAvroLocalState::WriteAvroLocalState(FunctionData &bind_data_p) {
 	auto &bind_data = bind_data_p.Cast<WriteAvroBindData>();
-	auto &global_state = bind_data.global_state->Cast<WriteAvroGlobalState>();
-	avro_generic_value_new(global_state.interface, &value);
+	avro_generic_value_new(bind_data.interface, &value);
 }
 
 WriteAvroLocalState::~WriteAvroLocalState() {
@@ -262,7 +263,8 @@ WriteAvroLocalState::~WriteAvroLocalState() {
 }
 
 WriteAvroGlobalState::~WriteAvroGlobalState() {
-	avro_value_iface_decref(interface);
+	//! NOTE: the 'writer' and 'datum_writer' do not need to be closed, they are owned by the file_writer
+	avro_file_writer_close(file_writer);
 }
 
 WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData &bind_data_p, FileSystem &fs,
@@ -291,7 +293,6 @@ WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData 
 	auto written_bytes = avro_writer_tell(writer);
 	WriteData(memory_buffer.GetData(), written_bytes);
 	avro_writer_memory_set_dest(writer, (const char *)memory_buffer.GetData(), memory_buffer.GetCapacity());
-	interface = avro_generic_class_from_schema(bind_data.schema);
 }
 
 static unique_ptr<FunctionData> WriteAvroBind(ClientContext &context, CopyFunctionBindInput &input,
@@ -308,9 +309,6 @@ static unique_ptr<LocalFunctionData> WriteAvroInitializeLocal(ExecutionContext &
 static unique_ptr<GlobalFunctionData> WriteAvroInitializeGlobal(ClientContext &context, FunctionData &bind_data_p,
                                                                 const string &file_path) {
 	auto res = make_uniq<WriteAvroGlobalState>(context, bind_data_p, FileSystem::GetFileSystem(context), file_path);
-	auto &bind_data = bind_data_p.Cast<WriteAvroBindData>();
-
-	bind_data.global_state = res.get();
 	return res;
 }
 
@@ -474,10 +472,7 @@ static void WriteAvroCombine(ExecutionContext &context, FunctionData &bind_data,
 }
 
 static void WriteAvroFinalize(ClientContext &context, FunctionData &bind_data, GlobalFunctionData &gstate) {
-	auto &global_state = gstate.Cast<WriteAvroGlobalState>();
-
-	//! Close the file, finishing the process
-	avro_file_writer_close(global_state.file_writer);
+	return;
 }
 
 CopyFunctionExecutionMode WriteAvroExecutionMode(bool preserve_insertion_order, bool supports_batch_index) {

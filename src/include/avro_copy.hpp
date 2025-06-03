@@ -20,12 +20,32 @@ public:
 
 public:
 	unique_ptr<FunctionData> Copy() const override {
-		//! FIXME: actually implement
-		return make_uniq<WriteAvroBindData>();
+		auto res = make_uniq<WriteAvroBindData>();
+		res->names = names;
+		res->types = types;
+
+		res->schema = avro_schema_incref(schema);
+		res->json_schema = json_schema;
+
+		res->interface = avro_value_iface_incref(interface);
+		return res;
 	}
 
-	bool Equals(const FunctionData &other) const override {
-		//! FIXME: actually implement
+	bool Equals(const FunctionData &other_p) const override {
+		auto &other = other_p.Cast<WriteAvroBindData>();
+		if (interface != other.interface) {
+			//! FIXME: is comparing pointers too much?
+			return false;
+		}
+		if (other.types.size() != types.size()) {
+			return false;
+		}
+		if (other.names.size() != names.size()) {
+			return false;
+		}
+		if (json_schema != other.json_schema) {
+			return false;
+		}
 		return true;
 	}
 
@@ -33,10 +53,12 @@ public:
 	vector<string> names;
 	vector<LogicalType> types;
 
-	optional_ptr<GlobalFunctionData> global_state;
 	//! The schema of the file to write
 	avro_schema_t schema = nullptr;
 	string json_schema;
+
+	//! The interface through which new avro values are created
+	avro_value_iface_t *interface = nullptr;
 };
 
 struct AvroInMemoryBuffer {
@@ -126,8 +148,6 @@ public:
 	avro_writer_t writer;
 	avro_writer_t datum_writer;
 	avro_file_writer_t file_writer;
-	//! The interface through which new avro values are created
-	avro_value_iface_t *interface = nullptr;
 };
 
 struct WriteAvroLocalState : public LocalFunctionData {
