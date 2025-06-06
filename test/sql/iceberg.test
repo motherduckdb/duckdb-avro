@@ -48,4 +48,6 @@ FROM read_avro('test/iceberg/snap-7635660646343998149-1-10eaca8a-1e1c-421e-ad6d-
 lineitem_iceberg/metadata/10eaca8a-1e1c-421e-ad6d-b232e5ee23d3-m0.avro	7687	0	0	2	2	7635660646343998149	0	0	1	0	0	60175	[]
 lineitem_iceberg/metadata/10eaca8a-1e1c-421e-ad6d-b232e5ee23d3-m1.avro	7692	0	0	2	2	7635660646343998149	1	0	0	51793	0	0	[]
 
-
+query IIIIIIIIIIIIIII
+FROM read_avro('test/iceberg/snap-4438118734176652631-1-2936af0b-e8dd-4ca3-b8b5-3e0346b5c662.avro') ORDER BY manifest_path
+----

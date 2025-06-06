@@ -9,7 +9,7 @@
 		"registries": [
 			{
 				"kind": "git",
-				"baseline": "8f4167a54c92f1754c86fbce4009ab51cf585210",
+				"baseline": "9989b8b4707261ce77425ae5364b7de7139a2030",
 				"repository": "https://github.com/duckdb/vcpkg-duckdb-ports",
 				"packages": [
 					"vcpkg-cmake",
