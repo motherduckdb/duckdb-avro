@@ -74,14 +74,15 @@ public:
 	}
 
 public:
-	void ParseFieldIds(const case_insensitive_map_t<vector<Value>> &options) {
+	void ParseFieldIds(const case_insensitive_map_t<vector<Value>> &options, case_insensitive_set_t &recognized) {
 		auto it = options.find("FIELD_IDS");
 		if (it == options.end()) {
 			return;
 		}
 		avro::FieldIDUtils::ParseFieldIds(it->second[0], names, types);
+		recognized.insert(it->first);
 	}
-	void ParseRootName(const case_insensitive_map_t<vector<Value>> &options) {
+	void ParseRootName(const case_insensitive_map_t<vector<Value>> &options, case_insensitive_set_t &recognized) {
 		auto it = options.find("ROOT_NAME");
 		if (it == options.end()) {
 			return;
@@ -92,6 +93,7 @@ public:
 			                            "of the top level 'record'");
 		}
 		root_name = value.GetValue<string>();
+		recognized.insert(it->first);
 	}
 
 public:
@@ -233,8 +235,24 @@ static string CreateJSONSchema(const case_insensitive_map_t<vector<Value>> &opti
                                const vector<LogicalType> &types) {
 	JSONSchemaGenerator state(names, types);
 
-	state.ParseFieldIds(options);
-	state.ParseRootName(options);
+	case_insensitive_set_t recognized;
+	state.ParseFieldIds(options, recognized);
+	state.ParseRootName(options, recognized);
+	vector<string> unrecognized_options;
+	for (auto &option : options) {
+		if (recognized.count(option.first)) {
+			continue;
+		}
+		auto key = option.first;
+		if (option.second.empty()) {
+			unrecognized_options.push_back(StringUtil::Format("key: '%s'", key));
+		} else {
+			unrecognized_options.push_back(StringUtil::Format("key: '%s' with value: '%s'", key, option.second[0].ToString()));
+		}
+	}
+	if (!unrecognized_options.empty()) {
+		throw InvalidConfigurationException("The following option(s) are not recognized: %s", StringUtil::Join(unrecognized_options, ", "));
+	}
 
 	return state.GenerateJSON();
 }
