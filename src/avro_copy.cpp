@@ -82,7 +82,7 @@ public:
 		if (it->second.empty()) {
 			throw InvalidInputException("FIELD_IDS can not be provided without a value");
 		}
-		avro::FieldIDUtils::ParseFieldIds(it->second[0], names, types);
+		field_ids = avro::FieldIDUtils::ParseFieldIds(it->second[0], names, types);
 		recognized.insert(it->first);
 	}
 	void ParseRootName(const case_insensitive_map_t<vector<Value>> &options, case_insensitive_set_t &recognized) {
