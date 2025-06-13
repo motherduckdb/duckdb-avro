@@ -88,6 +88,10 @@ public:
 			}
 			if (children.size() == 1) {
 				children[0].name = name;
+
+				if (avro_type.HasFieldId()) {
+					children[0].identifier = Value::INTEGER(avro_type.GetFieldId());
+				}
 				return std::move(children[0]);
 			}
 			if (children.empty()) {
