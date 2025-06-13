@@ -79,6 +79,9 @@ public:
 		if (it == options.end()) {
 			return;
 		}
+		if (it->second.empty()) {
+			throw InvalidInputException("FIELD_IDS can not be provided without a value");
+		}
 		avro::FieldIDUtils::ParseFieldIds(it->second[0], names, types);
 		recognized.insert(it->first);
 	}
@@ -87,12 +90,32 @@ public:
 		if (it == options.end()) {
 			return;
 		}
+		if (it->second.empty()) {
+			throw InvalidInputException("ROOT_NAME can not be provided without a value");
+		}
 		auto &value = it->second[0];
 		if (value.type().id() != LogicalTypeId::VARCHAR) {
 			throw InvalidInputException("'ROOT_NAME' is expected to be provided as VARCHAR, this is used for the name "
 			                            "of the top level 'record'");
 		}
 		root_name = value.GetValue<string>();
+		recognized.insert(it->first);
+	}
+	void ParseMetadata(const case_insensitive_map_t<vector<Value>> &options, case_insensitive_set_t &recognized) {
+		auto it = options.find("METADATA");
+		if (it == options.end()) {
+			return;
+		}
+
+		throw NotImplementedException("The 'METADATA' option is not supported in this release of Avro, please try upgrading your version ('FORCE INSTALL avro;')");
+
+		if (it->second.empty()) {
+			throw InvalidInputException("METADATA can not be provided without a value");
+		}
+		auto &value = it->second[0];
+		if (value.type().id() != LogicalTypeId::STRUCT) {
+			throw InvalidInputException("'METADATA' is expected to be provided as a STRUCT of key-value metadata");
+		}
 		recognized.insert(it->first);
 	}
 
@@ -238,6 +261,7 @@ static string CreateJSONSchema(const case_insensitive_map_t<vector<Value>> &opti
 	case_insensitive_set_t recognized;
 	state.ParseFieldIds(options, recognized);
 	state.ParseRootName(options, recognized);
+	state.ParseMetadata(options, recognized);
 	vector<string> unrecognized_options;
 	for (auto &option : options) {
 		if (recognized.count(option.first)) {
