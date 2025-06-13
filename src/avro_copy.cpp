@@ -74,17 +74,24 @@ public:
 	}
 
 public:
-	void ParseFieldIds(const case_insensitive_map_t<vector<Value>> &options) {
+	void ParseFieldIds(const case_insensitive_map_t<vector<Value>> &options, case_insensitive_set_t &recognized) {
 		auto it = options.find("FIELD_IDS");
 		if (it == options.end()) {
 			return;
 		}
+		if (it->second.empty()) {
+			throw InvalidInputException("FIELD_IDS can not be provided without a value");
+		}
 		avro::FieldIDUtils::ParseFieldIds(it->second[0], names, types);
+		recognized.insert(it->first);
 	}
-	void ParseRootName(const case_insensitive_map_t<vector<Value>> &options) {
+	void ParseRootName(const case_insensitive_map_t<vector<Value>> &options, case_insensitive_set_t &recognized) {
 		auto it = options.find("ROOT_NAME");
 		if (it == options.end()) {
 			return;
+		}
+		if (it->second.empty()) {
+			throw InvalidInputException("ROOT_NAME can not be provided without a value");
 		}
 		auto &value = it->second[0];
 		if (value.type().id() != LogicalTypeId::VARCHAR) {
@@ -92,6 +99,24 @@ public:
 			                            "of the top level 'record'");
 		}
 		root_name = value.GetValue<string>();
+		recognized.insert(it->first);
+	}
+	void ParseMetadata(const case_insensitive_map_t<vector<Value>> &options, case_insensitive_set_t &recognized) {
+		auto it = options.find("METADATA");
+		if (it == options.end()) {
+			return;
+		}
+
+		throw NotImplementedException("The 'METADATA' option is not supported in this release of Avro, please try upgrading your version ('FORCE INSTALL avro;')");
+
+		if (it->second.empty()) {
+			throw InvalidInputException("METADATA can not be provided without a value");
+		}
+		auto &value = it->second[0];
+		if (value.type().id() != LogicalTypeId::STRUCT) {
+			throw InvalidInputException("'METADATA' is expected to be provided as a STRUCT of key-value metadata");
+		}
+		recognized.insert(it->first);
 	}
 
 public:
@@ -233,8 +258,25 @@ static string CreateJSONSchema(const case_insensitive_map_t<vector<Value>> &opti
                                const vector<LogicalType> &types) {
 	JSONSchemaGenerator state(names, types);
 
-	state.ParseFieldIds(options);
-	state.ParseRootName(options);
+	case_insensitive_set_t recognized;
+	state.ParseFieldIds(options, recognized);
+	state.ParseRootName(options, recognized);
+	state.ParseMetadata(options, recognized);
+	vector<string> unrecognized_options;
+	for (auto &option : options) {
+		if (recognized.count(option.first)) {
+			continue;
+		}
+		auto key = option.first;
+		if (option.second.empty()) {
+			unrecognized_options.push_back(StringUtil::Format("key: '%s'", key));
+		} else {
+			unrecognized_options.push_back(StringUtil::Format("key: '%s' with value: '%s'", key, option.second[0].ToString()));
+		}
+	}
+	if (!unrecognized_options.empty()) {
+		throw InvalidConfigurationException("The following option(s) are not recognized: %s", StringUtil::Join(unrecognized_options, ", "));
+	}
 
 	return state.GenerateJSON();
 }
