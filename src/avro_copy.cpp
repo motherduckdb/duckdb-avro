@@ -144,7 +144,7 @@ public:
 		return StringUtil::Format("%s%d", base, generated_name_id++);
 	}
 
-	yyjson_mut_val *CreateJSONType(const string &name, const LogicalType &type, bool struct_field = false) {
+	yyjson_mut_val *CreateJSONType(const string &name, const LogicalType &type, optional_ptr<avro::FieldID> field_id, bool struct_field = false) {
 		yyjson_mut_val *object;
 		if (!type.IsNested()) {
 			object = yyjson_mut_obj(doc);
@@ -153,16 +153,15 @@ public:
 			//    "type": "bool"
 			//    < additional fields >
 			// }
-			auto it = field_ids.find(name);
-			if (it != field_ids.end()) {
-				yyjson_mut_obj_add_int(doc, object, "field-id", it->second.GetFieldId());
+			if (field_id) {
+				yyjson_mut_obj_add_int(doc, object, "field-id", field_id->GetFieldId());
 			}
 			if (struct_field) {
 				VerifyAvroName(name, type);
 				yyjson_mut_obj_add_strcpy(doc, object, "name", name.c_str());
 			}
 		} else {
-			object = CreateNestedType(name, type);
+			object = CreateNestedType(name, type, field_id);
 		}
 
 		auto wrapper = yyjson_mut_obj(doc);
@@ -172,10 +171,13 @@ public:
 		}
 		yyjson_mut_arr_add_strcpy(doc, union_type, "null");
 		yyjson_mut_arr_add_val(union_type, object);
+		if (field_id) {
+			yyjson_mut_obj_add_int(doc, wrapper, "field-id", field_id->GetFieldId());
+		}
 		return wrapper;
 	}
 
-	yyjson_mut_val *CreateNestedType(const string &name, const LogicalType &type) {
+	yyjson_mut_val *CreateNestedType(const string &name, const LogicalType &type, optional_ptr<avro::FieldID> field_id) {
 		D_ASSERT(type.IsNested());
 		auto object = yyjson_mut_obj(doc);
 		yyjson_mut_obj_add_strcpy(doc, object, "type", ConvertTypeToAvro(type).c_str());
@@ -188,16 +190,29 @@ public:
 			for (auto &it : struct_children) {
 				auto &child_name = it.first;
 				auto &child_type = it.second;
-				yyjson_mut_arr_add_val(fields, CreateJSONType(child_name, child_type, true));
+				optional_ptr<avro::FieldID> child_field_id;
+				if (field_id) {
+					auto it = field_id->children.find(child_name);
+					if (it != field_id->children.end()) {
+						child_field_id = it->second;
+					}
+				}
+				yyjson_mut_arr_add_val(fields, CreateJSONType(child_name, child_type, child_field_id, true));
 			}
 			break;
 		}
 		case LogicalTypeId::MAP:
 		case LogicalTypeId::LIST: {
+			optional_ptr<avro::FieldID> element_field_id;
+			if (field_id) {
+				auto it = field_id->children.find(name);
+				if (it != field_id->children.end()) {
+					element_field_id = it->second;
+				}
+			}
 			if (type.id() == LogicalTypeId::LIST) {
-				auto it = field_ids.find(name);
-				if (it != field_ids.end()) {
-					yyjson_mut_obj_add_int(doc, object, "element-id", it->second.GetFieldId());
+				if (element_field_id) {
+					yyjson_mut_obj_add_int(doc, object, "element-id", element_field_id->GetFieldId());
 				}
 			} else {
 				D_ASSERT(type.id() == LogicalTypeId::MAP);
@@ -208,7 +223,7 @@ public:
 			auto union_type = yyjson_mut_obj_add_arr(doc, object, "items");
 			yyjson_mut_arr_add_strcpy(doc, union_type, "null");
 			if (list_child.IsNested()) {
-				yyjson_mut_arr_add_val(union_type, CreateNestedType(GenerateSchemaName("element"), list_child));
+				yyjson_mut_arr_add_val(union_type, CreateNestedType(GenerateSchemaName("element"), list_child, element_field_id));
 			} else {
 				yyjson_mut_arr_add_strcpy(doc, union_type, ConvertTypeToAvro(list_child).c_str());
 			}
@@ -228,7 +243,12 @@ public:
 		for (idx_t i = 0; i < names.size(); i++) {
 			auto &name = names[i];
 			auto &type = types[i];
-			yyjson_mut_arr_add_val(array, CreateJSONType(name, type, true));
+			optional_ptr<avro::FieldID> field_id;
+			auto it = field_ids.find(name);
+			if (it != field_ids.end()) {
+				field_id = it->second;
+			}
+			yyjson_mut_arr_add_val(array, CreateJSONType(name, type, field_id, true));
 		}
 
 		//! Write the result to a string
