@@ -205,7 +205,7 @@ public:
 		case LogicalTypeId::LIST: {
 			optional_ptr<avro::FieldID> element_field_id;
 			if (field_id) {
-				auto it = field_id->children.find(name);
+				auto it = field_id->children.find("element");
 				if (it != field_id->children.end()) {
 					element_field_id = it->second;
 				}
