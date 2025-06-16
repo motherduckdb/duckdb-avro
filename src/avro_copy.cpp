@@ -192,8 +192,8 @@ public:
 				auto &child_type = it.second;
 				optional_ptr<avro::FieldID> child_field_id;
 				if (field_id) {
-					auto it = field_id->children.find(child_name);
-					if (it != field_id->children.end()) {
+					auto it = field_id->children->find(child_name);
+					if (it != field_id->children->end()) {
 						child_field_id = it->second;
 					}
 				}
@@ -205,8 +205,8 @@ public:
 		case LogicalTypeId::LIST: {
 			optional_ptr<avro::FieldID> element_field_id;
 			if (field_id) {
-				auto it = field_id->children.find("element");
-				if (it != field_id->children.end()) {
+				auto it = field_id->children->find("element");
+				if (it != field_id->children->end()) {
 					element_field_id = it->second;
 				}
 			}
