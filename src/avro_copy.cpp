@@ -12,6 +12,19 @@ using namespace duckdb_yyjson; // NOLINT
 
 namespace duckdb {
 
+namespace {
+
+struct YyjsonDocDeleter {
+	void operator()(yyjson_doc *doc) {
+		yyjson_doc_free(doc);
+	}
+	void operator()(yyjson_mut_doc *doc) {
+		yyjson_mut_doc_free(doc);
+	}
+};
+
+} // namespace
+
 static string ConvertTypeToAvro(const LogicalType &type) {
 	switch (type.id()) {
 	case LogicalTypeId::VARCHAR:
@@ -99,23 +112,6 @@ public:
 			                            "of the top level 'record'");
 		}
 		root_name = value.GetValue<string>();
-		recognized.insert(it->first);
-	}
-	void ParseMetadata(const case_insensitive_map_t<vector<Value>> &options, case_insensitive_set_t &recognized) {
-		auto it = options.find("METADATA");
-		if (it == options.end()) {
-			return;
-		}
-
-		throw NotImplementedException("The 'METADATA' option is not supported in this release of Avro, please try upgrading your version ('FORCE INSTALL avro;')");
-
-		if (it->second.empty()) {
-			throw InvalidInputException("METADATA can not be provided without a value");
-		}
-		auto &value = it->second[0];
-		if (value.type().id() != LogicalTypeId::STRUCT) {
-			throw InvalidInputException("'METADATA' is expected to be provided as a STRUCT of key-value metadata");
-		}
 		recognized.insert(it->first);
 	}
 
@@ -275,15 +271,70 @@ public:
 };
 
 static string CreateJSONSchema(const case_insensitive_map_t<vector<Value>> &options, const vector<string> &names,
-                               const vector<LogicalType> &types) {
+                               const vector<LogicalType> &types, case_insensitive_set_t &recognized) {
 	JSONSchemaGenerator state(names, types);
-
-	case_insensitive_set_t recognized;
+	
 	state.ParseFieldIds(options, recognized);
 	state.ParseRootName(options, recognized);
-	state.ParseMetadata(options, recognized);
+	return state.GenerateJSON();
+}
+
+static string CreateJSONMetadata(const case_insensitive_map_t<vector<Value>> &options, case_insensitive_set_t &recognized) {
+	auto it = options.find("METADATA");
+	if (it == options.end()) {
+		return "";
+	}
+
+	if (it->second.empty()) {
+		throw InvalidInputException("METADATA can not be provided without a value");
+	}
+	auto &value = it->second[0];
+	if (value.type().id() != LogicalTypeId::STRUCT) {
+		throw InvalidInputException("'METADATA' is expected to be provided as a STRUCT of key-value string metadata");
+	}
+	recognized.insert(it->first);
+
+	unordered_map<string, string> metadata;
+	auto &children = StructValue::GetChildren(value);
+	auto &child_types = StructType::GetChildTypes(value.type());
+	for (idx_t i = 0; i < children.size(); i++) {
+		auto &child = children[i];
+		auto &child_name = child_types[i].first;
+		metadata[child_name] = child.ToString();
+	}
+
+	std::unique_ptr<yyjson_mut_doc, YyjsonDocDeleter> doc_p(yyjson_mut_doc_new(nullptr));
+	auto doc = doc_p.get();
+	yyjson_mut_val *root_object = yyjson_mut_obj(doc);
+	yyjson_mut_doc_set_root(doc, root_object);
+
+	for (auto &item : metadata) {
+		auto &key = item.first;
+		auto &value = item.second;
+		yyjson_mut_obj_add_strcpy(doc, root_object, key.c_str(), value.c_str());
+	}
+
+	//! Write the result to a string
+	auto data = yyjson_mut_val_write_opts(root_object, YYJSON_WRITE_ALLOW_INF_AND_NAN, nullptr, nullptr, nullptr);
+	if (!data) {
+		throw InvalidInputException("Could not create a JSON representation of the metadata, yyjson failed");
+	}
+	auto res = string(data);
+	free(data);
+	return res;
+}
+
+WriteAvroBindData::WriteAvroBindData(CopyFunctionBindInput &input, const vector<string> &names,
+                                     const vector<LogicalType> &types)
+    : names(names), types(types) {
+
+	case_insensitive_set_t recognized;
+
+	json_metadata = CreateJSONMetadata(input.info.options, recognized);
+	json_schema = CreateJSONSchema(input.info.options, names, types, recognized);
+
 	vector<string> unrecognized_options;
-	for (auto &option : options) {
+	for (auto &option : input.info.options) {
 		if (recognized.count(option.first)) {
 			continue;
 		}
@@ -298,14 +349,6 @@ static string CreateJSONSchema(const case_insensitive_map_t<vector<Value>> &opti
 		throw InvalidConfigurationException("The following option(s) are not recognized: %s", StringUtil::Join(unrecognized_options, ", "));
 	}
 
-	return state.GenerateJSON();
-}
-
-WriteAvroBindData::WriteAvroBindData(CopyFunctionBindInput &input, const vector<string> &names,
-                                     const vector<LogicalType> &types)
-    : names(names), types(types) {
-
-	json_schema = CreateJSONSchema(input.info.options, names, types);
 	if (avro_schema_from_json_length(json_schema.c_str(), json_schema.size(), &schema)) {
 		throw InvalidInputException(avro_strerror());
 	}
@@ -345,7 +388,7 @@ WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData 
 	int ret;
 	writer = avro_writer_memory(const_char_ptr_cast(memory_buffer.GetData()), memory_buffer.GetCapacity());
 	datum_writer = avro_writer_memory(const_char_ptr_cast(datum_buffer.GetData()), datum_buffer.GetCapacity());
-	while ((ret = avro_file_writer_create_from_writers(writer, datum_writer, bind_data.schema, &file_writer)) == ENOSPC) {
+	while ((ret = avro_file_writer_create_from_writers_with_metadata(writer, datum_writer, bind_data.schema, &file_writer, bind_data.json_metadata.c_str())) == ENOSPC) {
 		auto current_capacity = memory_buffer.GetCapacity();
 		memory_buffer.Resize(NextPowerOfTwo(current_capacity * 2));
 	}

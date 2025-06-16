@@ -57,6 +57,7 @@ public:
 	avro_schema_t schema = nullptr;
 	string json_schema;
 
+	string json_metadata;
 	//! The interface through which new avro values are created
 	avro_value_iface_t *interface = nullptr;
 };

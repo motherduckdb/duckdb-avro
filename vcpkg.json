@@ -4,18 +4,8 @@
 	],
 	"vcpkg-configuration": {
 		"overlay-ports": [
-			"./vcpkg_ports"
-		],
-		"registries": [
-			{
-				"kind": "git",
-				"baseline": "9989b8b4707261ce77425ae5364b7de7139a2030",
-				"repository": "https://github.com/duckdb/vcpkg-duckdb-ports",
-				"packages": [
-					"vcpkg-cmake",
-					"avro-c"
-				]
-			}
+			"./vcpkg_ports",
+			"./extension-ci-tools/vcpkg_ports"
 		]
 	},
 	"builtin-baseline": "5e5d0e1cd7785623065e77eff011afdeec1a3574"
