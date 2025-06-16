@@ -5,10 +5,10 @@ namespace duckdb {
 
 namespace avro {
 
-FieldID::FieldID() : set(false) {
+FieldID::FieldID() : set(false), children(make_uniq<case_insensitive_map_t<FieldID>>()) {
 }
 
-FieldID::FieldID(int32_t field_id_p) : set(true), field_id(field_id_p) {
+FieldID::FieldID(int32_t field_id_p) : set(true), field_id(field_id_p), children(make_uniq<case_insensitive_map_t<FieldID>>()) {
 }
 
 int32_t FieldID::GetFieldId() const {
@@ -113,7 +113,7 @@ static void GetFieldIDs(const Value &field_ids_value, case_insensitive_map_t<Fie
 				                      col_name, LogicalTypeIdToString(col_type.id()));
 			}
 
-			GetFieldIDs(*child_field_ids_value, inserted.first->second.children, unique_field_ids,
+			GetFieldIDs(*child_field_ids_value, *(inserted.first->second.children), unique_field_ids,
 			            GetChildNameToTypeMap(col_type));
 		}
 	}

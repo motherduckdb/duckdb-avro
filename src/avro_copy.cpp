@@ -194,8 +194,8 @@ public:
 				auto &child_type = it.second;
 				optional_ptr<avro::FieldID> child_field_id;
 				if (field_id) {
-					auto it = field_id->children.find(child_name);
-					if (it != field_id->children.end()) {
+					auto it = field_id->children->find(child_name);
+					if (it != field_id->children->end()) {
 						child_field_id = it->second;
 					}
 				}
@@ -210,8 +210,8 @@ public:
 			// if the type is a map, we cannot union the elements with null
 			auto is_map = type.id() == LogicalTypeId::MAP;
 			if (field_id) {
-				auto it = field_id->children.find("element");
-				if (it != field_id->children.end()) {
+				auto it = field_id->children->find("element");
+				if (it != field_id->children->end()) {
 					element_field_id = it->second;
 				}
 			}
