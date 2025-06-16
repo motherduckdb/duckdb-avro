@@ -388,7 +388,13 @@ WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData 
 	int ret;
 	writer = avro_writer_memory(const_char_ptr_cast(memory_buffer.GetData()), memory_buffer.GetCapacity());
 	datum_writer = avro_writer_memory(const_char_ptr_cast(datum_buffer.GetData()), datum_buffer.GetCapacity());
-	while ((ret = avro_file_writer_create_from_writers_with_metadata(writer, datum_writer, bind_data.schema, &file_writer, bind_data.json_metadata.c_str())) == ENOSPC) {
+
+	const char *json_metadata = nullptr;
+	if (!bind_data.json_metadata.empty()) {
+		json_metadata = bind_data.json_metadata.c_str();
+	}
+
+	while ((ret = avro_file_writer_create_from_writers_with_metadata(writer, datum_writer, bind_data.schema, &file_writer, json_metadata)) == ENOSPC) {
 		auto current_capacity = memory_buffer.GetCapacity();
 		memory_buffer.Resize(NextPowerOfTwo(current_capacity * 2));
 	}
