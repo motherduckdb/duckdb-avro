@@ -11,7 +11,6 @@ COPY (
 ) TO '__TEST_DIR__/empty_struct.avro' (
 	FIELD_IDS {
 		'empty_partition': {
-			'__duckdb_empty_struct_marker': 2147483642,
 			'__duckdb_field_id': 102
 		}
 	},
