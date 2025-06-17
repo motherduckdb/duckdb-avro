@@ -17,8 +17,7 @@ select * from read_avro('__TEST_DIR__/tmp.avro');
 ----
 {'a': {'child': 21}, 'b': {'child': true}}
 
-# The ROOT_NAME (top level record) is not subject to this limitation
-statement ok
+statement error
 COPY (
 	select {
 		'a': {
@@ -26,6 +25,17 @@ COPY (
 		}
 	} structure
 ) TO '__TEST_DIR__/tmp2.avro' ( ROOT_NAME 'a');
+----
+Invalid Input Error: Cannot save record schema
+
+statement ok
+COPY (
+	select {
+		'a': {
+			'field': true
+		}
+	} structure
+) TO '__TEST_DIR__/tmp2.avro' ( ROOT_NAME 'root_a');
 
 query I
 select * from read_avro('__TEST_DIR__/tmp2.avro');
