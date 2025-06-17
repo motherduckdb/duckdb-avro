@@ -140,7 +140,8 @@ public:
 		return StringUtil::Format("%s%d", base, generated_name_id++);
 	}
 
-	yyjson_mut_val *CreateJSONType(const string &name, const LogicalType &type, optional_ptr<avro::FieldID> field_id, bool struct_field = false) {
+	yyjson_mut_val *CreateJSONType(const string &name, const LogicalType &type, optional_ptr<avro::FieldID> field_id,
+	                               bool struct_field = false) {
 		yyjson_mut_val *object;
 		if (!type.IsNested()) {
 			object = yyjson_mut_obj(doc);
@@ -173,7 +174,8 @@ public:
 		return wrapper;
 	}
 
-	yyjson_mut_val *CreateNestedType(const string &name, const LogicalType &type, optional_ptr<avro::FieldID> field_id) {
+	yyjson_mut_val *CreateNestedType(const string &name, const LogicalType &type,
+	                                 optional_ptr<avro::FieldID> field_id) {
 		D_ASSERT(type.IsNested());
 		auto object = yyjson_mut_obj(doc);
 		yyjson_mut_obj_add_strcpy(doc, object, "type", ConvertTypeToAvro(type).c_str());
@@ -185,6 +187,9 @@ public:
 			auto fields = yyjson_mut_obj_add_arr(doc, object, "fields");
 			for (auto &it : struct_children) {
 				auto &child_name = it.first;
+				if (StringUtil::CIEquals(child_name, "__duckdb_empty_struct_marker")) {
+					continue;
+				}
 				auto &child_type = it.second;
 				optional_ptr<avro::FieldID> child_field_id;
 				if (field_id) {
@@ -219,7 +224,8 @@ public:
 			auto union_type = yyjson_mut_obj_add_arr(doc, object, "items");
 			yyjson_mut_arr_add_strcpy(doc, union_type, "null");
 			if (list_child.IsNested()) {
-				yyjson_mut_arr_add_val(union_type, CreateNestedType(GenerateSchemaName("element"), list_child, element_field_id));
+				yyjson_mut_arr_add_val(union_type,
+				                       CreateNestedType(GenerateSchemaName("element"), list_child, element_field_id));
 			} else {
 				yyjson_mut_arr_add_strcpy(doc, union_type, ConvertTypeToAvro(list_child).c_str());
 			}
@@ -342,11 +348,13 @@ WriteAvroBindData::WriteAvroBindData(CopyFunctionBindInput &input, const vector<
 		if (option.second.empty()) {
 			unrecognized_options.push_back(StringUtil::Format("key: '%s'", key));
 		} else {
-			unrecognized_options.push_back(StringUtil::Format("key: '%s' with value: '%s'", key, option.second[0].ToString()));
+			unrecognized_options.push_back(
+			    StringUtil::Format("key: '%s' with value: '%s'", key, option.second[0].ToString()));
 		}
 	}
 	if (!unrecognized_options.empty()) {
-		throw InvalidConfigurationException("The following option(s) are not recognized: %s", StringUtil::Join(unrecognized_options, ", "));
+		throw InvalidConfigurationException("The following option(s) are not recognized: %s",
+		                                    StringUtil::Join(unrecognized_options, ", "));
 	}
 
 	if (avro_schema_from_json_length(json_schema.c_str(), json_schema.size(), &schema)) {
@@ -382,7 +390,8 @@ WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData 
 	auto &bind_data = bind_data_p.Cast<WriteAvroBindData>();
 
 	//! Guess how big the "header" of the Avro file needs to be
-	idx_t capacity = MaxValue<idx_t>(BUFFER_SIZE, NextPowerOfTwo(bind_data.json_schema.size() + SYNC_SIZE + MAX_ROW_COUNT_BYTES));
+	idx_t capacity =
+	    MaxValue<idx_t>(BUFFER_SIZE, NextPowerOfTwo(bind_data.json_schema.size() + SYNC_SIZE + MAX_ROW_COUNT_BYTES));
 	memory_buffer.Resize(capacity);
 
 	int ret;
@@ -496,8 +505,12 @@ static idx_t PopulateValue(avro_value_t *target, const Value &val) {
 	}
 	case LogicalTypeId::STRUCT: {
 		auto &struct_values = StructValue::GetChildren(val);
+		auto &child_types = StructType::GetChildTypes(val.type());
 		idx_t struct_value_size = 0;
 		for (idx_t i = 0; i < struct_values.size(); i++) {
+			if (StringUtil::CIEquals(child_types[i].first, "__duckdb_empty_struct_marker")) {
+				continue;
+			}
 			const char *unused_name;
 			avro_value_t field;
 			if (avro_value_get_by_index(target, i, &field, &unused_name)) {
