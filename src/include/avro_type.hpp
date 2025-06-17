@@ -95,7 +95,10 @@ public:
 				return std::move(children[0]);
 			}
 			if (children.empty()) {
-				throw InvalidInputException("Empty union type");
+				if (avro_type.children.empty()) {
+					throw InvalidInputException("Empty union type");
+				}
+				return MultiFileColumnDefinition(name, LogicalType::SQLNULL);
 			}
 
 			child_list_t<LogicalType> type_children;
