@@ -64,8 +64,6 @@ public:
 		doc = yyjson_mut_doc_new(nullptr);
 		root_object = yyjson_mut_obj(doc);
 		yyjson_mut_doc_set_root(doc, root_object);
-		yyjson_mut_obj_add_str(doc, root_object, "type", "record");
-		yyjson_mut_obj_add_strcpy(doc, root_object, "name", root_name.c_str());
 	}
 	~JSONSchemaGenerator() {
 		if (doc) {
@@ -236,6 +234,8 @@ public:
 	}
 
 	string GenerateJSON() {
+		yyjson_mut_obj_add_str(doc, root_object, "type", "record");
+		yyjson_mut_obj_add_strcpy(doc, root_object, "name", root_name.c_str());
 		auto array = yyjson_mut_obj_add_arr(doc, root_object, "fields");
 
 		//! Add all the fields
