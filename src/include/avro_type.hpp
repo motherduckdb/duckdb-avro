@@ -98,7 +98,11 @@ public:
 				if (avro_type.children.empty()) {
 					throw InvalidInputException("Empty union type");
 				}
-				return MultiFileColumnDefinition(name, LogicalType::SQLNULL);
+				auto res = MultiFileColumnDefinition(name, LogicalType::SQLNULL);
+				if (avro_type.HasFieldId()) {
+					res.identifier = Value::INTEGER(avro_type.GetFieldId());
+				}
+				return res;
 			}
 
 			child_list_t<LogicalType> type_children;
