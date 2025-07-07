@@ -3,6 +3,13 @@ cmake_minimum_required(VERSION 3.10)
 # Set extension name here
 set(TARGET_NAME avro)
 
+if (EMSCRIPTEN)
+  # _LINKED_LIBS influences only Wasm compilation
+  # it's unclear why this is needed, but somehow the global symbol pj_release from PROJ is not properly exported otherwise
+  # this solves by basically re-linking (at the moment the Wasm binary is actually produced)
+  set (DUCKDB_EXTENSION_SPATIAL_LINKED_LIBS "../../vcpkg_installed/wasm32-emscripten/lib/lib*.a")
+endif()
+
 find_path(
   AVRO_INCLUDE_DIR
   NAMES avro.h
