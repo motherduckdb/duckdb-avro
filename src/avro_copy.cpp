@@ -419,18 +419,18 @@ WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData 
 static unique_ptr<FunctionData> WriteAvroBind(ClientContext &context, CopyFunctionBindInput &input,
                                               const vector<string> &names, const vector<LogicalType> &sql_types) {
 	auto res = make_uniq<WriteAvroBindData>(input, names, sql_types);
-	return res;
+	return std::move(res);
 }
 
 static unique_ptr<LocalFunctionData> WriteAvroInitializeLocal(ExecutionContext &context, FunctionData &bind_data_p) {
 	auto res = make_uniq<WriteAvroLocalState>(bind_data_p);
-	return res;
+	return std::move(res);
 }
 
 static unique_ptr<GlobalFunctionData> WriteAvroInitializeGlobal(ClientContext &context, FunctionData &bind_data_p,
                                                                 const string &file_path) {
 	auto res = make_uniq<WriteAvroGlobalState>(context, bind_data_p, FileSystem::GetFileSystem(context), file_path);
-	return res;
+	return std::move(res);
 }
 
 static idx_t PopulateValue(avro_value_t *target, const Value &val);
@@ -577,7 +577,7 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 	auto &buffer = global_state.memory_buffer;
 	auto expected_size = avro_writer_tell(global_state.datum_writer);
 	expected_size += WriteAvroGlobalState::SYNC_SIZE + WriteAvroGlobalState::MAX_ROW_COUNT_BYTES;
-	if (expected_size > buffer.GetCapacity()) {
+	if (static_cast<idx_t>(expected_size) > buffer.GetCapacity()) {
 		//! Resize the buffer in advance, to prevent any need for resizing below
 		buffer.Resize(NextPowerOfTwo(expected_size));
 		avro_writer_memory_set_dest(global_state.writer, (const char *)buffer.GetData(), buffer.GetCapacity());

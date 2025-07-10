@@ -28,7 +28,7 @@ public:
 		res->json_schema = json_schema;
 
 		res->interface = avro_value_iface_incref(interface);
-		return res;
+		return std::move(res);
 	}
 
 	bool Equals(const FunctionData &other_p) const override {
