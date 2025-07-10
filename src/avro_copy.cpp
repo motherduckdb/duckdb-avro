@@ -577,7 +577,7 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 	auto &buffer = global_state.memory_buffer;
 	auto expected_size = avro_writer_tell(global_state.datum_writer);
 	expected_size += WriteAvroGlobalState::SYNC_SIZE + WriteAvroGlobalState::MAX_ROW_COUNT_BYTES;
-	if (expected_size > buffer.GetCapacity()) {
+	if (static_cast<idx_t>(expected_size) > buffer.GetCapacity()) {
 		//! Resize the buffer in advance, to prevent any need for resizing below
 		buffer.Resize(NextPowerOfTwo(expected_size));
 		avro_writer_memory_set_dest(global_state.writer, (const char *)buffer.GetData(), buffer.GetCapacity());

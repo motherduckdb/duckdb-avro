@@ -260,13 +260,13 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type, Vect
 	}
 
 	case LogicalTypeId::UNION: {
-		int discriminant;
+		int discriminant = 0;
 		avro_value union_value;
 		if (avro_value_get_discriminant(avro_val, &discriminant) ||
 		    avro_value_get_current_branch(avro_val, &union_value)) {
 			throw InvalidInputException(avro_strerror());
 		}
-		if (discriminant >= avro_type.children.size()) {
+		if (static_cast<size_t>(discriminant) >= avro_type.children.size()) {
 			throw InvalidInputException("Invalid union tag");
 		}
 
@@ -302,7 +302,7 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type, Vect
 		if (avro_value_get_enum(avro_val, &enum_val)) {
 			throw InvalidInputException(avro_strerror());
 		}
-		if (enum_val < 0 || enum_val >= EnumType::GetSize(target.GetType())) {
+		if (enum_val < 0 || static_cast<idx_t>(enum_val) >= EnumType::GetSize(target.GetType())) {
 			throw InvalidInputException("Enum value out of range");
 		}
 
