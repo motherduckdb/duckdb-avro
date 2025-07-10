@@ -419,18 +419,18 @@ WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData 
 static unique_ptr<FunctionData> WriteAvroBind(ClientContext &context, CopyFunctionBindInput &input,
                                               const vector<string> &names, const vector<LogicalType> &sql_types) {
 	auto res = make_uniq<WriteAvroBindData>(input, names, sql_types);
-	return res;
+	return std::move(res);
 }
 
 static unique_ptr<LocalFunctionData> WriteAvroInitializeLocal(ExecutionContext &context, FunctionData &bind_data_p) {
 	auto res = make_uniq<WriteAvroLocalState>(bind_data_p);
-	return res;
+	return std::move(res);
 }
 
 static unique_ptr<GlobalFunctionData> WriteAvroInitializeGlobal(ClientContext &context, FunctionData &bind_data_p,
                                                                 const string &file_path) {
 	auto res = make_uniq<WriteAvroGlobalState>(context, bind_data_p, FileSystem::GetFileSystem(context), file_path);
-	return res;
+	return std::move(res);
 }
 
 static idx_t PopulateValue(avro_value_t *target, const Value &val);
