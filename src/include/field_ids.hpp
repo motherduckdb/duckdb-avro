@@ -28,7 +28,7 @@ public:
 	bool set = false;
 	int32_t field_id;
 	bool nullable = true;
-	unique_ptr<case_insensitive_map_t<FieldID>> children;
+	unique_ptr<case_insensitive_map_t<FieldID>> children = make_uniq<case_insensitive_map_t<FieldID>>();
 };
 
 struct FieldIDUtils {
