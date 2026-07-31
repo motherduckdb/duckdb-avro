@@ -338,6 +338,8 @@ public:
 		if (IsNamedSchema(type)) {
 			D_ASSERT(IsJSONObject(type_val));
 			if (preset_schema_name) {
+				VerifyAvroName(preset_schema_name);
+				VerifyNamedSchemaUniqueness(preset_schema_name);
 				yyjson_mut_obj_add_strcpy(doc, type_val, "name", preset_schema_name);
 			} else {
 				auto named_schema = GenerateSchemaName(avro_type_str);
@@ -348,6 +350,8 @@ public:
 	}
 
 	string GenerateJSON() {
+		VerifyAvroName(root_name);
+		VerifyNamedSchemaUniqueness(root_name);
 		yyjson_mut_obj_add_str(doc, root_object, "type", "record");
 		yyjson_mut_obj_add_strcpy(doc, root_object, "name", root_name.c_str());
 		auto array = yyjson_mut_obj_add_arr(doc, root_object, "fields");
@@ -390,8 +394,11 @@ private:
 	yyjson_mut_val *CreateStructField(const string &name, const LogicalType &type,
 	                                  optional_ptr<avro::FieldID> field_id) {
 		auto struct_field = yyjson_mut_obj(doc);
-		const char *struct_name = name.c_str();
-		auto struct_field_type = CreateJSONType(type, field_id, struct_name);
+		auto schema_name = name;
+		if (type.id() == LogicalTypeId::STRUCT && field_id) {
+			schema_name = StringUtil::Format("r%d", field_id->GetFieldId());
+		}
+		auto struct_field_type = CreateJSONType(type, field_id, schema_name.c_str());
 		if (!field_id || field_id->nullable) {
 			auto union_array = yyjson_mut_arr(doc);
 			yyjson_mut_arr_add_strcpy(doc, union_array, "null");
