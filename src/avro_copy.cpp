@@ -390,8 +390,11 @@ private:
 	yyjson_mut_val *CreateStructField(const string &name, const LogicalType &type,
 	                                  optional_ptr<avro::FieldID> field_id) {
 		auto struct_field = yyjson_mut_obj(doc);
-		const char *struct_name = name.c_str();
-		auto struct_field_type = CreateJSONType(type, field_id, struct_name);
+		auto schema_name = name;
+		if (type.id() == LogicalTypeId::STRUCT && field_id) {
+			schema_name = StringUtil::Format("r%d", field_id->GetFieldId());
+		}
+		auto struct_field_type = CreateJSONType(type, field_id, schema_name.c_str());
 		if (!field_id || field_id->nullable) {
 			auto union_array = yyjson_mut_arr(doc);
 			yyjson_mut_arr_add_strcpy(doc, union_array, "null");
