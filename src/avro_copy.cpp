@@ -338,6 +338,8 @@ public:
 		if (IsNamedSchema(type)) {
 			D_ASSERT(IsJSONObject(type_val));
 			if (preset_schema_name) {
+				VerifyAvroName(preset_schema_name);
+				VerifyNamedSchemaUniqueness(preset_schema_name);
 				yyjson_mut_obj_add_strcpy(doc, type_val, "name", preset_schema_name);
 			} else {
 				auto named_schema = GenerateSchemaName(avro_type_str);
@@ -348,6 +350,8 @@ public:
 	}
 
 	string GenerateJSON() {
+		VerifyAvroName(root_name);
+		VerifyNamedSchemaUniqueness(root_name);
 		yyjson_mut_obj_add_str(doc, root_object, "type", "record");
 		yyjson_mut_obj_add_strcpy(doc, root_object, "name", root_name.c_str());
 		auto array = yyjson_mut_obj_add_arr(doc, root_object, "fields");

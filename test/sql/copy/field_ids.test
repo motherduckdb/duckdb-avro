@@ -53,6 +53,24 @@ WHERE key = 'avro.schema';
 ----
 r2	r102
 
+# A root record can collide with the Iceberg-style name of a nested record that
+# has a field ID. Reject the collision before producing an invalid Avro schema:
+# named types must be unique across the entire schema.
+statement error
+COPY (
+	SELECT {'value': 84} data_file
+) TO '{TEST_DIR}/field_id_record_name_collision.avro' (
+	FIELD_IDS {
+		'data_file': {
+			'__duckdb_field_id': 2,
+			'value': 3
+		}
+	},
+	ROOT_NAME 'r2'
+);
+----
+Binder Error: Avro schema by the name of 'r2' already exists, names of 'record', 'enum' and 'fixed' types have to be distinct
+
 statement ok
 COPY (
 	select [
