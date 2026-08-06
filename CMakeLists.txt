@@ -21,6 +21,7 @@ endif()
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(THREADSAFE ON CACHE BOOL "" FORCE)
 
 # avro-c still declares an old cmake_minimum_required(). With newer CMake
 # releases we need to raise the policy floor before adding the subdirectory.

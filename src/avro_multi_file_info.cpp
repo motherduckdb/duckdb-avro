@@ -30,6 +30,7 @@ struct AvroMultiFileData final : public TableFunctionData {
 public:
 	AvroMultiFileData() = default;
 	AvroFileReaderOptions options;
+	idx_t initial_file_block_count = 1;
 };
 
 unique_ptr<TableFunctionData> AvroMultiFileInfo::InitializeBindData(MultiFileBindData &multi_file_data,
@@ -52,14 +53,23 @@ void AvroMultiFileInfo::BindReader(ClientContext &context, vector<LogicalType> &
 	D_ASSERT(names.size() == return_types.size());
 }
 
+void AvroMultiFileInfo::FinalizeBindData(MultiFileBindData &multi_file_data) {
+	if (!multi_file_data.initial_reader) {
+		return;
+	}
+	auto &avro_data = multi_file_data.bind_data->Cast<AvroMultiFileData>();
+	auto &initial_reader = multi_file_data.initial_reader->Cast<AvroReader>();
+	avro_data.initial_file_block_count = initial_reader.NumBlocks();
+}
+
 optional_idx AvroMultiFileInfo::MaxThreads(const MultiFileBindData &bind_data_p,
                                            const MultiFileGlobalState &global_state, FileExpandResult expand_result) {
 	if (expand_result == FileExpandResult::MULTIPLE_FILES) {
 		// always launch max threads if we are reading multiple files
 		return {};
 	}
-	// Otherwise, only one thread
-	return 1;
+	auto &avro_data = bind_data_p.bind_data->Cast<AvroMultiFileData>();
+	return MaxValue<idx_t>(avro_data.initial_file_block_count, 1);
 }
 
 struct AvroFileGlobalState : public GlobalTableFunctionState {
@@ -68,9 +78,7 @@ public:
 	~AvroFileGlobalState() override = default;
 
 public:
-	//! TODO: this should contain the state of the current file being scanned
-	//! so we can parallelize over a single file
-	set<idx_t> files;
+	idx_t next_block_index = 0;
 };
 
 unique_ptr<GlobalTableFunctionState> AvroMultiFileInfo::InitializeGlobalState(ClientContext &context,
@@ -87,6 +95,8 @@ public:
 
 public:
 	shared_ptr<AvroReader> file_scan;
+	unique_ptr<AvroReaderScanState> scan_state;
+	idx_t block_index = 0;
 	ClientContext &context;
 };
 
@@ -118,20 +128,37 @@ bool AvroReader::TryInitializeScan(ClientContext &context, GlobalTableFunctionSt
                                    LocalTableFunctionState &lstate_p) {
 	auto &gstate = gstate_p.Cast<AvroFileGlobalState>();
 	auto &lstate = lstate_p.Cast<AvroFileLocalState>();
-	if (gstate.files.count(file_list_idx.GetIndex())) {
-		// Return false because we don't currently support more than one thread
-		// scanning a file.
+	if (gstate.next_block_index >= NumBlocks()) {
 		return false;
 	}
-	gstate.files.insert(file_list_idx.GetIndex());
+	if (!lstate.file_scan || lstate.file_scan.get() != this) {
+		lstate.scan_state.reset();
+	}
 	lstate.file_scan = shared_ptr_cast<BaseFileReader, AvroReader>(shared_from_this());
+	lstate.block_index = gstate.next_block_index++;
 	return true;
+}
+
+void AvroReader::PrepareScan(ClientContext &context, GlobalTableFunctionState &gstate_p,
+                             LocalTableFunctionState &lstate_p) {
+	auto &lstate = lstate_p.Cast<AvroFileLocalState>();
+	if (!lstate.scan_state) {
+		lstate.scan_state = make_uniq<AvroReaderScanState>(context, *this);
+	}
+	lstate.scan_state->SelectBlock(lstate.block_index);
 }
 
 AsyncResult AvroReader::Scan(ClientContext &context, GlobalTableFunctionState &global_state,
                              LocalTableFunctionState &local_state_p, DataChunk &chunk) {
-	Read(chunk);
+	auto &lstate = local_state_p.Cast<AvroFileLocalState>();
+	D_ASSERT(lstate.scan_state);
+	Read(*lstate.scan_state, chunk);
 	return chunk.size() ? AsyncResult(SourceResultType::HAVE_MORE_OUTPUT) : AsyncResult(SourceResultType::FINISHED);
+}
+
+void AvroReader::FinishFile(ClientContext &context, GlobalTableFunctionState &gstate_p) {
+	auto &gstate = gstate_p.Cast<AvroFileGlobalState>();
+	gstate.next_block_index = 0;
 }
 
 InsertionOrderPreservingMap<Value> AvroReader::GetMetadata() const {
