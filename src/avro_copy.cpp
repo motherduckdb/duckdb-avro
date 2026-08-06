@@ -190,7 +190,7 @@ public:
 	}
 
 public:
-	void ParseFieldIds(const case_insensitive_map_t<vector<Value>> &options, case_insensitive_set_t &recognized) {
+	void ParseFieldIds(const identifier_map_t<vector<Value>> &options, identifier_set_t &recognized) {
 		auto it = options.find("FIELD_IDS");
 		if (it == options.end()) {
 			return;
@@ -201,7 +201,7 @@ public:
 		field_ids = avro::FieldIDUtils::ParseFieldIds(it->second[0], names, types);
 		recognized.insert(it->first);
 	}
-	void ParseRootName(const case_insensitive_map_t<vector<Value>> &options, case_insensitive_set_t &recognized) {
+	void ParseRootName(const identifier_map_t<vector<Value>> &options, identifier_set_t &recognized) {
 		auto it = options.find("ROOT_NAME");
 		if (it == options.end()) {
 			return;
@@ -452,8 +452,8 @@ public:
 	unordered_set<string> named_schemas;
 };
 
-static string CreateJSONSchema(const case_insensitive_map_t<vector<Value>> &options, const vector<string> &names,
-                               const vector<LogicalType> &types, case_insensitive_set_t &recognized) {
+static string CreateJSONSchema(const identifier_map_t<vector<Value>> &options, const vector<string> &names,
+                               const vector<LogicalType> &types, identifier_set_t &recognized) {
 	JSONSchemaGenerator state(names, types);
 
 	state.ParseFieldIds(options, recognized);
@@ -461,8 +461,8 @@ static string CreateJSONSchema(const case_insensitive_map_t<vector<Value>> &opti
 	return state.GenerateJSON();
 }
 
-static string CreateJSONMetadata(const case_insensitive_map_t<vector<Value>> &options,
-                                 case_insensitive_set_t &recognized) {
+static string CreateJSONMetadata(const identifier_map_t<vector<Value>> &options,
+                                 identifier_set_t &recognized) {
 	auto it = options.find("METADATA");
 	if (it == options.end()) {
 		return "";
@@ -512,7 +512,7 @@ static string CreateJSONMetadata(const case_insensitive_map_t<vector<Value>> &op
 //! defaults to "null"). The codec name itself is validated by avro-c when the writer is created
 //! (it reports "Unknown codec X" for anything the library was not built with), so this stays in
 //! lock-step with avro-c's actual capabilities instead of duplicating a list that could drift.
-static string ParseCodec(const case_insensitive_map_t<vector<Value>> &options, case_insensitive_set_t &recognized) {
+static string ParseCodec(const identifier_map_t<vector<Value>> &options, identifier_set_t &recognized) {
 	auto it = options.find("CODEC");
 	if (it == options.end()) {
 		return "";
@@ -532,7 +532,7 @@ WriteAvroBindData::WriteAvroBindData(CopyFunctionBindInput &input, const vector<
                                      const vector<LogicalType> &types)
     : names(IdentifiersToStrings(names)), types(types) {
 
-	case_insensitive_set_t recognized;
+	identifier_set_t recognized;
 
 	json_metadata = CreateJSONMetadata(input.info.options, recognized);
 	json_schema = CreateJSONSchema(input.info.options, this->names, types, recognized);
