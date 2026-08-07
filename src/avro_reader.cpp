@@ -221,11 +221,14 @@ AvroReader::AvroReader(ClientContext &context, OpenFileInfo file, const AvroFile
 	local_buffer = Allocator::DefaultAllocator().Allocate(total_size);
 	fs.Read(*file_handle, local_buffer.get(), total_size);
 
-	auto avro_reader = avro_reader_memory(const_char_ptr_cast(local_buffer.get()), total_size);
-
-	if (avro_reader_reader(avro_reader, &reader)) {
+	if (avro_file_reader_memory(const_char_ptr_cast(local_buffer.get()), total_size, &reader)) {
 		throw InvalidInputException(avro_strerror());
 	}
+	size_t file_block_count;
+	if (avro_file_reader_get_block_count(reader, &file_block_count)) {
+		throw InvalidInputException(avro_strerror());
+	}
+	block_count = file_block_count;
 
 	auto avro_schema = avro_file_reader_get_writer_schema(reader);
 	auto schema_name = avro_schema_name(avro_schema);
@@ -234,11 +237,10 @@ AvroReader::AvroReader(ClientContext &context, OpenFileInfo file, const AvroFile
 	avro_type = TransformSchema(avro_schema, {});
 	auto root = AvroType::TransformAvroType(root_name, avro_type);
 	duckdb_type = root.type;
-	read_chunk.Initialize(context, {duckdb_type}, STANDARD_VECTOR_SIZE);
-
-	auto interface = avro_generic_class_from_schema(avro_schema);
-	avro_generic_value_new(interface, &value);
-	avro_value_iface_decref(interface);
+	value_iface = avro_generic_class_from_schema(avro_schema);
+	if (!value_iface) {
+		throw InvalidInputException(avro_strerror());
+	}
 
 	// special handling for root structs, we pull up the entries
 	if (duckdb_type.id() == LogicalTypeId::STRUCT) {
@@ -248,6 +250,30 @@ AvroReader::AvroReader(ClientContext &context, OpenFileInfo file, const AvroFile
 		columns.push_back(std::move(root));
 	}
 	avro_schema_decref(avro_schema);
+}
+
+AvroReaderScanState::AvroReaderScanState(ClientContext &context, AvroReader &reader_p) : reader(reader_p) {
+	if (avro_file_block_reader_create(reader.reader, &block_reader)) {
+		throw InvalidInputException(avro_strerror());
+	}
+	if (avro_generic_value_new(reader.value_iface, &value)) {
+		avro_file_block_reader_close(block_reader);
+		block_reader = nullptr;
+		throw InvalidInputException(avro_strerror());
+	}
+	read_chunk.Initialize(context, {reader.duckdb_type}, STANDARD_VECTOR_SIZE);
+}
+
+AvroReaderScanState::~AvroReaderScanState() {
+	avro_value_decref(&value);
+	avro_file_block_reader_close(block_reader);
+}
+
+void AvroReaderScanState::SelectBlock(idx_t block_index) {
+	avro_value_reset(&value);
+	if (avro_file_block_reader_select_block(block_reader, block_index)) {
+		throw InvalidInputException(avro_strerror());
+	}
 }
 
 static void TransformValue(avro_value *avro_val, const AvroType &avro_type, Vector &target, idx_t out_idx) {
@@ -607,17 +633,21 @@ static void TransformValue(avro_value *avro_val, const AvroType &avro_type, Vect
 	}
 }
 
-void AvroReader::Read(DataChunk &output) {
+void AvroReader::Read(AvroReaderScanState &scan_state, DataChunk &output) {
 	idx_t out_idx = 0;
-	read_chunk.Reset();
+	scan_state.read_chunk.Reset();
 
-	D_ASSERT(read_chunk.ColumnCount() == 1);
-	auto &read_vec = read_chunk.data[0];
-	while (avro_file_reader_read_value(reader, &value) == 0) {
-		TransformValue(&value, avro_type, read_vec, out_idx++);
+	D_ASSERT(scan_state.read_chunk.ColumnCount() == 1);
+	auto &read_vec = scan_state.read_chunk.data[0];
+	int ret = 0;
+	while ((ret = avro_file_block_reader_read_value(scan_state.block_reader, &scan_state.value)) == 0) {
+		TransformValue(&scan_state.value, avro_type, read_vec, out_idx++);
 		if (out_idx == STANDARD_VECTOR_SIZE) {
 			break;
 		}
+	}
+	if (ret != 0 && ret != EOF) {
+		throw InvalidInputException(avro_strerror());
 	}
 
 	// pull up root struct into output chunk
