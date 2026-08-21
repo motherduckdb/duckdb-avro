@@ -461,8 +461,7 @@ static string CreateJSONSchema(const identifier_map_t<vector<Value>> &options, c
 	return state.GenerateJSON();
 }
 
-static string CreateJSONMetadata(const identifier_map_t<vector<Value>> &options,
-                                 identifier_set_t &recognized) {
+static string CreateJSONMetadata(const identifier_map_t<vector<Value>> &options, identifier_set_t &recognized) {
 	auto it = options.find("METADATA");
 	if (it == options.end()) {
 		return "";
@@ -545,10 +544,10 @@ WriteAvroBindData::WriteAvroBindData(CopyFunctionBindInput &input, const vector<
 		}
 		auto key = option.first;
 		if (option.second.empty()) {
-			unrecognized_options.push_back(StringUtil::Format("key: '%s'", key));
+			unrecognized_options.push_back(StringUtil::Format("key: %s", key));
 		} else {
 			unrecognized_options.push_back(
-			    StringUtil::Format("key: '%s' with value: '%s'", key, option.second[0].ToString()));
+			    StringUtil::Format("key: %s with value: '%s'", key, option.second[0].ToString()));
 		}
 	}
 	if (!unrecognized_options.empty()) {

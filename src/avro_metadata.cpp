@@ -65,8 +65,8 @@ static void AvroMetadataFunction(ClientContext &context, TableFunctionInput &dat
 			throw InvalidInputException("Failed to get metadata at index %llu", gstate.offset);
 		}
 
-		output.SetValue(0, count, Value(key ? string(key) : string()));
-		output.SetValue(1, count, Value(value ? string(value, value_size) : string()));
+		output.data[0].SetValue(count, Value(key ? string(key) : string()));
+		output.data[1].SetValue(count, Value(value ? string(value, value_size) : string()));
 
 		gstate.offset++;
 		count++;
