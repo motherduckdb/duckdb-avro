@@ -545,10 +545,10 @@ WriteAvroBindData::WriteAvroBindData(CopyFunctionBindInput &input, const vector<
 		}
 		auto key = option.first;
 		if (option.second.empty()) {
-			unrecognized_options.push_back(StringUtil::Format("key: '%s'", key));
+			unrecognized_options.push_back(StringUtil::Format("key: %s", key));
 		} else {
 			unrecognized_options.push_back(
-			    StringUtil::Format("key: '%s' with value: '%s'", key, option.second[0].ToString()));
+			    StringUtil::Format("key: %s with value: '%s'", key, option.second[0].ToString()));
 		}
 	}
 	if (!unrecognized_options.empty()) {

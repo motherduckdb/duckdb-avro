@@ -15,7 +15,7 @@ unique_ptr<BaseFileReaderOptions> AvroMultiFileInfo::InitializeOptions(ClientCon
 }
 
 bool AvroMultiFileInfo::ParseCopyOption(ClientContext &context, const Identifier &key, const vector<Value> &values,
-                                        BaseFileReaderOptions &options_p, vector<string> &expected_names,
+                                        BaseFileReaderOptions &options_p, vector<Identifier> &expected_names,
                                         vector<LogicalType> &expected_types) {
 	// We currently do not have any options for the scanner, so we always return false
 	return false;
