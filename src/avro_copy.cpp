@@ -699,7 +699,7 @@ static idx_t WriteBigIntValue(avro_value_t *target, const int64_t &value, const 
 }
 
 static idx_t WriteStringValue(avro_value_t *target, const string_t &value, const LogicalType &) {
-	avro_value_set_string_len(target, value.GetData(), value.GetSize() + 1);
+	avro_value_set_string_len(target, value.GetData(), value.GetSize());
 	return value.GetSize();
 }
 
