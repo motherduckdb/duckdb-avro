@@ -699,7 +699,11 @@ static idx_t WriteBigIntValue(avro_value_t *target, const int64_t &value, const 
 }
 
 static idx_t WriteStringValue(avro_value_t *target, const string_t &value, const LogicalType &) {
-	avro_value_set_string_len(target, value.GetData(), value.GetSize() + 1);
+	//! Avro copies the NUL terminator, but string_t need not be NUL-terminated.
+	//! NOTE: avro-c ignores the string size in some implementations, instead using `strdup` which requires a null-terminated c-string
+	//! For that reason, we need to use `GetString` as the `string` is guaranteed to be null-terminated, while a string_t isn't
+	auto terminated = value.GetString();
+	avro_value_set_string_len(target, terminated.c_str(), terminated.size() + 1);
 	return value.GetSize();
 }
 
