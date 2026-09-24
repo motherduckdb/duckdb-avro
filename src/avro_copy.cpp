@@ -218,6 +218,18 @@ public:
 		recognized.insert(it->first);
 	}
 
+	void ParseSanitizeFieldNames(const identifier_map_t<vector<Value>> &options, identifier_set_t &recognized) {
+		auto it = options.find("SANITIZE_FIELD_NAMES");
+		if (it == options.end()) {
+			return;
+		}
+		if (it->second.size() != 1 || it->second[0].IsNull() || it->second[0].type().id() != LogicalTypeId::BOOLEAN) {
+			throw InvalidInputException("SANITIZE_FIELD_NAMES requires a non-NULL BOOLEAN value");
+		}
+		sanitize_field_names = it->second[0].GetValue<bool>();
+		recognized.insert(it->first);
+	}
+
 public:
 	void VerifyAvroName(const string &name) {
 		D_ASSERT(!name.empty());
@@ -261,6 +273,7 @@ public:
 			type_val = WrapTypeInObject(doc, type_val);
 			auto &struct_children = StructType::GetChildTypes(type);
 			auto fields = yyjson_mut_obj_add_arr(doc, type_val, "fields");
+			unordered_map<string, string> field_names;
 			for (auto &it : struct_children) {
 				auto &child_name = it.first;
 				if (child_name == "__duckdb_empty_struct_marker") {
@@ -269,7 +282,8 @@ public:
 				auto &child_type = it.second;
 				auto child_field_id = GetChildFieldIdByName(field_id, child_name.GetIdentifierName());
 
-				auto struct_field = CreateStructField(child_name.GetIdentifierName(), child_type, child_field_id);
+				auto struct_field =
+				    CreateStructField(child_name.GetIdentifierName(), child_type, child_field_id, field_names);
 				yyjson_mut_arr_add_val(fields, struct_field);
 			}
 		} else if (type_id == LogicalTypeId::LIST) {
@@ -356,6 +370,7 @@ public:
 		yyjson_mut_obj_add_strcpy(doc, root_object, "name", root_name.c_str());
 		auto array = yyjson_mut_obj_add_arr(doc, root_object, "fields");
 
+		unordered_map<string, string> field_names;
 		//! Add all the fields
 		D_ASSERT(names.size() == types.size());
 		for (idx_t i = 0; i < names.size(); i++) {
@@ -367,7 +382,7 @@ public:
 			if (it != children.end()) {
 				field_id = it->second;
 			}
-			yyjson_mut_arr_add_val(array, CreateStructField(name, type, field_id));
+			yyjson_mut_arr_add_val(array, CreateStructField(name, type, field_id, field_names));
 		}
 
 		//! Write the result to a string
@@ -391,10 +406,42 @@ private:
 		}
 	}
 
-	yyjson_mut_val *CreateStructField(const string &name, const LogicalType &type,
-	                                  optional_ptr<avro::FieldID> field_id) {
+	string SanitizeFieldName(const string &name, unordered_map<string, string> &field_names) {
+		if (!sanitize_field_names) {
+			return name;
+		}
+		if (name.empty()) {
+			throw InvalidInputException("Cannot sanitize an empty Avro field name");
+		}
+		// Follow Iceberg's AvroSchemaUtil escaping for ASCII. Escape UTF-8 bytes as well,
+		// since the Avro identifier grammar only permits ASCII letters and digits.
+		string result;
+		result.reserve(name.size());
+		for (idx_t i = 0; i < name.size(); i++) {
+			auto c = static_cast<unsigned char>(name[i]);
+			auto digit = c >= '0' && c <= '9';
+			if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || (i && digit)) {
+				result += c;
+			} else if (digit) {
+				result += '_';
+				result += c;
+			} else {
+				result += StringUtil::Format("_x%X", static_cast<unsigned int>(c));
+			}
+		}
+		auto entry = field_names.emplace(result, name);
+		if (!entry.second) {
+			throw BinderException("SANITIZE_FIELD_NAMES maps both '%s' and '%s' to '%s' in the same Avro record",
+			                      entry.first->second, name, result);
+		}
+		return result;
+	}
+
+	yyjson_mut_val *CreateStructField(const string &name, const LogicalType &type, optional_ptr<avro::FieldID> field_id,
+	                                  unordered_map<string, string> &field_names) {
+		auto output_name = SanitizeFieldName(name, field_names);
 		auto struct_field = yyjson_mut_obj(doc);
-		auto schema_name = name;
+		auto schema_name = output_name;
 		if (type.id() == LogicalTypeId::STRUCT && field_id) {
 			schema_name = StringUtil::Format("r%d", field_id->GetFieldId());
 		}
@@ -409,7 +456,7 @@ private:
 		if (field_id) {
 			yyjson_mut_obj_add_uint(doc, struct_field, "field-id", field_id->GetFieldId());
 		}
-		yyjson_mut_obj_add_strcpy(doc, struct_field, "name", name.c_str());
+		yyjson_mut_obj_add_strcpy(doc, struct_field, "name", output_name.c_str());
 		return struct_field;
 	}
 
@@ -444,6 +491,7 @@ public:
 	const vector<string> &names;
 	const vector<LogicalType> &types;
 
+	bool sanitize_field_names = false;
 	string root_name = "root";
 	avro::ChildFieldIDs field_ids;
 	idx_t generated_name_id = 0;
@@ -458,6 +506,7 @@ static string CreateJSONSchema(const identifier_map_t<vector<Value>> &options, c
 
 	state.ParseFieldIds(options, recognized);
 	state.ParseRootName(options, recognized);
+	state.ParseSanitizeFieldNames(options, recognized);
 	return state.GenerateJSON();
 }
 
