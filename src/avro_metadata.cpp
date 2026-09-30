@@ -76,8 +76,8 @@ static void AvroMetadataFunction(ClientContext &context, TableFunctionInput &dat
 }
 
 TableFunction AvroMetadata::GetFunction() {
-	TableFunction func("avro_metadata", {LogicalType::VARCHAR}, AvroMetadataFunction, AvroMetadataBind,
-	                   AvroMetadataInit);
+	TableFunction func("avro_metadata", FunctionSignature().AddPositionalOnly("path", LogicalType::VARCHAR),
+	                   AvroMetadataFunction, AvroMetadataBind, AvroMetadataInit);
 	return func;
 }
 
