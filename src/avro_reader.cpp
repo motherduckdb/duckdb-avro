@@ -643,6 +643,7 @@ reader_ptr_t CreateReader(const AvroType &avro_type, const AvroColumn &column) {
 	case LogicalTypeId::TIMESTAMP:
 	case LogicalTypeId::TIMESTAMP_TZ:
 	case LogicalTypeId::TIMESTAMP_NS:
+	case LogicalTypeId::TIMESTAMP_TZ_NS:
 	case LogicalTypeId::BIGINT:
 		return std::make_unique<BigIntReader>(avro_type.is_timestamp_millis);
 	case LogicalTypeId::FLOAT:

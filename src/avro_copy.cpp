@@ -140,6 +140,7 @@ std::string ConvertTypeToAvro(const LogicalType &type) {
 		// timestamp-micros
 		return "long";
 	case LogicalTypeId::TIMESTAMP_TZ:
+	case LogicalTypeId::TIMESTAMP_TZ_NS:
 		// timestamp tz will capture
 		// local-timestamp-micros
 		return "long";
@@ -166,6 +167,7 @@ bool IsTemporal(LogicalTypeId id) {
 	case LogicalTypeId::TIMESTAMP_MS:
 	case LogicalTypeId::TIMESTAMP_NS:
 	case LogicalTypeId::TIMESTAMP_TZ:
+	case LogicalTypeId::TIMESTAMP_TZ_NS:
 		return true;
 	default:
 		return false;
@@ -183,6 +185,7 @@ std::string GetTemporalLogicalType(const LogicalType &type) {
 	case LogicalTypeId::TIMESTAMP_TZ:
 		return "timestamp-micros";
 	case LogicalTypeId::TIMESTAMP_NS:
+	case LogicalTypeId::TIMESTAMP_TZ_NS:
 		return "timestamp-nanos";
 	default:
 		throw NotImplementedError("Can't convert logical type '" + type.ToText() + "' to Avro temporal type");
@@ -418,7 +421,7 @@ private:
 		} else if (IsTemporal(type_id)) {
 			type_val = WrapTypeInObject(std::move(type_val));
 			json_object_set_new(type_val.get(), "logicalType", json_string(GetTemporalLogicalType(type).c_str()));
-			if (type_id == LogicalTypeId::TIMESTAMP_TZ) {
+			if (type_id == LogicalTypeId::TIMESTAMP_TZ || type_id == LogicalTypeId::TIMESTAMP_TZ_NS) {
 				json_object_set_new(type_val.get(), "adjust-to-utc", json_true());
 			}
 		} else if (type_id == LogicalTypeId::DECIMAL) {
@@ -769,6 +772,11 @@ idx_t WriteTimestampTZValue(avro_value_t *target, const cxx::timestamp_tz_t &val
 	return sizeof(int64_t);
 }
 
+idx_t WriteTimestampTZNSValue(avro_value_t *target, const cxx::timestamp_tz_ns_t &value, uint8_t) {
+	avro_value_set_long(target, value.nanos);
+	return sizeof(int64_t);
+}
+
 idx_t WriteUUIDValue(avro_value_t *target, const cxx::uuid_t &value, uint8_t) {
 	auto bytes = value.Decode();
 	avro_value_set_fixed(target, bytes.bytes, sizeof(bytes.bytes));
@@ -901,6 +909,8 @@ writer_ptr_t CreateAvroColumnWriter(const LogicalType &type) {
 		return std::make_unique<PrimitiveAvroColumnWriter<cxx::timestamp_t>>(type_name, WriteTimestampValue);
 	case LogicalTypeId::TIMESTAMP_TZ:
 		return std::make_unique<PrimitiveAvroColumnWriter<cxx::timestamp_tz_t>>(type_name, WriteTimestampTZValue);
+	case LogicalTypeId::TIMESTAMP_TZ_NS:
+		return std::make_unique<PrimitiveAvroColumnWriter<cxx::timestamp_tz_ns_t>>(type_name, WriteTimestampTZNSValue);
 	case LogicalTypeId::UUID:
 		return std::make_unique<PrimitiveAvroColumnWriter<cxx::uuid_t>>(type_name, WriteUUIDValue);
 	case LogicalTypeId::DECIMAL: {

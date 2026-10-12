@@ -45,10 +45,7 @@ AvroLogicalType AvroLogicalTypeToLogicalType(avro_schema_t avro_schema) {
 		result.id = adjust_to_utc > 0 ? LogicalTypeId::TIMESTAMP_TZ : LogicalTypeId::TIMESTAMP;
 	} else if (logical_type == "timestamp-nanos") {
 		auto adjust_to_utc = avro_schema_adjust_to_utc(avro_schema);
-		if (adjust_to_utc > 0) {
-			throw NotImplementedError("Avro timestamp-nanos with adjust_to_utc not supported");
-		}
-		result.id = LogicalTypeId::TIMESTAMP_NS;
+		result.id = adjust_to_utc > 0 ? LogicalTypeId::TIMESTAMP_TZ_NS : LogicalTypeId::TIMESTAMP_NS;
 	} else if (logical_type == "uuid") {
 		auto size = avro_schema_fixed_size(avro_schema);
 		if (size != 16) {
