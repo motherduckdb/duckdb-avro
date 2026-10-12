@@ -53,6 +53,15 @@ set(EXTENSION_SOURCES
     src/field_ids.cpp
     src/avro_metadata.cpp)
 
+# DuckDB only adds tools/ (which defines the duckdb_cpp_api targets) when it
+# builds its main library or uses a prebuilt one. Extension-only builds, such as
+# the Wasm ones, skip it, so add the C++ API ourselves there.
+if(NOT BUILD_MAIN_DUCKDB_LIBRARY
+   AND NOT PREBUILT_BINARY
+   AND NOT TARGET duckdb_cpp_api)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/tools/cpp ${CMAKE_BINARY_DIR}/tools/cpp)
+endif()
+
 # The extension is written against DuckDB's stable C++ API (duckdb_cpp.hpp). It
 # uses parts of that API that are still unstable, which pins the build to the
 # exact DuckDB version it is built against.
