@@ -265,6 +265,18 @@ public:
 		return object;
 	}
 
+	//! Wraps a type in a union with null
+	yyjson_mut_val *MakeNullable(yyjson_mut_val *type_val) {
+		//! Null is already nullable, and Avro unions cannot contain duplicate types.
+		if (yyjson_mut_is_str(type_val) && strcmp(yyjson_mut_get_str(type_val), "null") == 0) {
+			return type_val;
+		}
+		auto union_array = yyjson_mut_arr(doc);
+		yyjson_mut_arr_add_strcpy(doc, union_array, "null");
+		yyjson_mut_arr_add_val(union_array, type_val);
+		return union_array;
+	}
+
 	yyjson_mut_val *CreateJSONType(const LogicalType &type, optional_ptr<avro::FieldID> field_id,
 	                               const char *preset_schema_name = nullptr) {
 		auto avro_type_str = ConvertTypeToAvro(type);
@@ -302,10 +314,7 @@ public:
 			}
 
 			if (!element_field_id || element_field_id->nullable) {
-				auto union_array = yyjson_mut_arr(doc);
-				yyjson_mut_arr_add_strcpy(doc, union_array, "null");
-				yyjson_mut_arr_add_val(union_array, items_type_val);
-				items_type_val = union_array;
+				items_type_val = MakeNullable(items_type_val);
 			}
 			yyjson_mut_obj_add_val(doc, type_val, "items", items_type_val);
 
@@ -449,10 +458,7 @@ private:
 		}
 		auto struct_field_type = CreateJSONType(type, field_id, schema_name.c_str());
 		if (!field_id || field_id->nullable) {
-			auto union_array = yyjson_mut_arr(doc);
-			yyjson_mut_arr_add_strcpy(doc, union_array, "null");
-			yyjson_mut_arr_add_val(union_array, struct_field_type);
-			struct_field_type = union_array;
+			struct_field_type = MakeNullable(struct_field_type);
 		}
 		yyjson_mut_obj_add_val(doc, struct_field, "type", struct_field_type);
 		if (field_id) {
