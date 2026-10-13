@@ -354,6 +354,10 @@ private:
 
 	//! Wraps a type in a union with null
 	static json_ptr_t MakeNullable(json_ptr_t type_val) {
+		//! Null is already nullable, and Avro unions cannot contain duplicate types.
+		if (json_is_string(type_val.get()) && strcmp(json_string_value(type_val.get()), "null") == 0) {
+			return type_val;
+		}
 		json_ptr_t union_array(json_array());
 		json_array_append_new(union_array.get(), json_string("null"));
 		json_array_append_new(union_array.get(), type_val.release());
