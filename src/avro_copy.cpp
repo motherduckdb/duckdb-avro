@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <jansson.h>
+#include <type_traits>
 #include <unordered_set>
 
 namespace duckdb {
@@ -968,6 +969,35 @@ writer_ptr_t CreateAvroColumnWriter(const LogicalType &type) {
 //===--------------------------------------------------------------------===//
 // Writing a file
 //===--------------------------------------------------------------------===//
+struct AvroWriterDeleter {
+	void operator()(avro_writer_t writer) const {
+		avro_writer_free(writer);
+	}
+};
+using avro_writer_ptr_t = std::unique_ptr<std::remove_pointer_t<avro_writer_t>, AvroWriterDeleter>;
+
+struct AvroFileWriterDeleter {
+	void operator()(avro_file_writer_t writer) const {
+		//! Each completed block is flushed explicitly; destruction must also work after a failed flush.
+		avro_file_writer_free(writer);
+	}
+};
+using avro_file_writer_ptr_t = std::unique_ptr<std::remove_pointer_t<avro_file_writer_t>, AvroFileWriterDeleter>;
+
+struct AvroWriteValue {
+	AvroWriteValue() = default;
+	AvroWriteValue(const AvroWriteValue &) = delete;
+	AvroWriteValue &operator=(const AvroWriteValue &) = delete;
+
+	~AvroWriteValue() {
+		if (value.iface) {
+			avro_value_decref(&value);
+		}
+	}
+
+	avro_value_t value {};
+};
+
 //! A growable buffer that avro-c writes into
 struct AvroInMemoryBuffer {
 public:
@@ -1014,52 +1044,49 @@ public:
 		    BUFFER_SIZE, NextPowerOfTwo(bind_data.json_schema.size() + SYNC_SIZE + MAX_ROW_COUNT_BYTES));
 		memory_buffer.Resize(capacity);
 
-		writer = avro_writer_memory(memory_buffer.GetData(), static_cast<int64_t>(memory_buffer.GetCapacity()));
-		datum_writer = avro_writer_memory(datum_buffer.GetData(), static_cast<int64_t>(datum_buffer.GetCapacity()));
-
 		const char *json_metadata = bind_data.json_metadata.empty() ? nullptr : bind_data.json_metadata.c_str();
 		//! Pass the compression codec straight to avro-c so the object container is written compressed
 		//! natively (no post-processing). Empty -> nullptr -> avro-c default ("null"/uncompressed).
 		const char *codec = bind_data.codec.empty() ? nullptr : bind_data.codec.c_str();
 
-		int ret;
-		while ((ret = avro_file_writer_create_from_writers_with_metadata_and_codec(
-		            writer, datum_writer, bind_data.schema, &file_writer, json_metadata, codec)) == ENOSPC) {
-			memory_buffer.Resize(NextPowerOfTwo(memory_buffer.GetCapacity() * 2));
-			// re-initialize writer to use correct data location
-			avro_file_writer_close(file_writer);
-			file_writer = nullptr;
-			writer = avro_writer_memory(memory_buffer.GetData(), static_cast<int64_t>(memory_buffer.GetCapacity()));
-			datum_writer = avro_writer_memory(datum_buffer.GetData(), static_cast<int64_t>(datum_buffer.GetCapacity()));
-		}
-		if (ret) {
-			auto error = AvroError();
-			if (!file_writer) {
-				//! the writers were not handed over to a file writer (e.g. an unknown codec)
-				avro_writer_free(writer);
-				avro_writer_free(datum_writer);
+		for (;;) {
+			avro_writer_ptr_t new_writer(
+			    avro_writer_memory(memory_buffer.GetData(), static_cast<int64_t>(memory_buffer.GetCapacity())));
+			if (!new_writer) {
+				throw AvroError();
 			}
-			throw error;
+			avro_writer_ptr_t new_datum_writer(
+			    avro_writer_memory(datum_buffer.GetData(), static_cast<int64_t>(datum_buffer.GetCapacity())));
+			if (!new_datum_writer) {
+				throw AvroError();
+			}
+			avro_file_writer_t new_file_writer = nullptr;
+			auto ret = avro_file_writer_create_from_writers_with_metadata_and_codec(
+			    new_writer.get(), new_datum_writer.get(), bind_data.schema, &new_file_writer, json_metadata, codec);
+			file_writer.reset(new_file_writer);
+			if (file_writer) {
+				//! A returned file writer owns both memory writers, including on header errors.
+				writer = new_writer.release();
+				datum_writer = new_datum_writer.release();
+			}
+			if (ret != ENOSPC) {
+				if (ret) {
+					throw AvroError();
+				}
+				break;
+			}
+			file_writer.reset();
+			memory_buffer.Resize(NextPowerOfTwo(memory_buffer.GetCapacity() * 2));
 		}
 
 		WriteData(memory_buffer.GetData(), static_cast<idx_t>(avro_writer_tell(writer)));
 		avro_writer_memory_set_dest(writer, memory_buffer.GetData(), static_cast<int64_t>(memory_buffer.GetCapacity()));
 
-		if (avro_generic_value_new(bind_data.interface, &value)) {
+		if (avro_generic_value_new(bind_data.interface, &row.value)) {
 			throw AvroError();
 		}
-		value_initialized = true;
 		for (auto &type : bind_data.types) {
 			column_writers.push_back(CreateAvroColumnWriter(type));
-		}
-	}
-	~WriteAvroGlobalState() {
-		if (value_initialized) {
-			avro_value_decref(&value);
-		}
-		//! NOTE: the 'writer' and 'datum_writer' do not need to be closed, they are owned by the file_writer
-		if (file_writer) {
-			avro_file_writer_close(file_writer);
 		}
 	}
 
@@ -1080,7 +1107,7 @@ public:
 			for (idx_t col_idx = 0; col_idx < column_count; col_idx++) {
 				const char *unused_name;
 				avro_value_t column;
-				if (avro_value_get_by_index(&value, col_idx, &column, &unused_name)) {
+				if (avro_value_get_by_index(&row.value, col_idx, &column, &unused_name)) {
 					throw AvroError();
 				}
 				value_size += column_writers[col_idx]->Write(&column, i);
@@ -1095,7 +1122,7 @@ public:
 			SetDatumDestination(offset_in_datum_buffer);
 
 			int ret;
-			while ((ret = avro_file_writer_append_value(file_writer, &value)) == ENOSPC) {
+			while ((ret = avro_file_writer_append_value(file_writer.get(), &row.value)) == ENOSPC) {
 				datum_buffer.ResizeAndCopy(NextPowerOfTwo(datum_buffer.GetCapacity() * 2));
 				SetDatumDestination(offset_in_datum_buffer);
 			}
@@ -1104,7 +1131,7 @@ public:
 			}
 
 			offset_in_datum_buffer = static_cast<idx_t>(avro_writer_tell(datum_writer));
-			avro_value_reset(&value);
+			avro_value_reset(&row.value);
 		}
 
 		auto expected_size = static_cast<idx_t>(avro_writer_tell(datum_writer)) + SYNC_SIZE + MAX_ROW_COUNT_BYTES;
@@ -1116,7 +1143,7 @@ public:
 
 		//! Flush the contents to the buffer, if it fails, resize the buffer and try again
 		int ret;
-		while ((ret = avro_file_writer_flush(file_writer)) == ENOSPC) {
+		while ((ret = avro_file_writer_flush(file_writer.get())) == ENOSPC) {
 			memory_buffer.Resize(NextPowerOfTwo(memory_buffer.GetCapacity() * 2));
 			SetDestination();
 		}
@@ -1178,14 +1205,13 @@ private:
 	AvroInMemoryBuffer memory_buffer;
 	AvroInMemoryBuffer datum_buffer;
 
-	//! The writer for the file
+	//! Borrowed from file_writer after successful ownership transfer.
 	avro_writer_t writer = nullptr;
 	avro_writer_t datum_writer = nullptr;
-	avro_file_writer_t file_writer = nullptr;
+	avro_file_writer_ptr_t file_writer;
 
 	//! Avro value representing a row of the schema
-	avro_value_t value;
-	bool value_initialized = false;
+	AvroWriteValue row;
 	std::vector<writer_ptr_t> column_writers;
 };
 
