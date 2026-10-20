@@ -80,6 +80,16 @@ target_link_libraries(${EXTENSION_NAME} duckdb_cpp_api avro-static)
 target_link_libraries(${LOADABLE_EXTENSION_NAME} duckdb_cpp_api_loadable
                       avro-static)
 
+option(AVRO_BUILD_WRITER_TESTS "Build the Avro writer fault-injection tests" OFF)
+if(AVRO_BUILD_WRITER_TESTS)
+  add_executable(avro_writer_tests test/cpp/test_writer_cleanup.cpp)
+  target_include_directories(avro_writer_tests PRIVATE ${AVRO_INCLUDE_DIR})
+  target_link_libraries(avro_writer_tests duckdb_static)
+  duckdb_link_extensions(avro_writer_tests core_functions avro)
+  enable_testing()
+  add_test(NAME avro_writer_cleanup COMMAND avro_writer_tests)
+endif()
+
 # Mark avro-static as part of the export set
 install(
   TARGETS ${EXTENSION_NAME} avro-static
