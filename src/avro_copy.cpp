@@ -265,6 +265,18 @@ public:
 		return object;
 	}
 
+	//! Wraps a type in a union with null
+	yyjson_mut_val *MakeNullable(yyjson_mut_val *type_val) {
+		//! Null is already nullable, and Avro unions cannot contain duplicate types.
+		if (yyjson_mut_is_str(type_val) && strcmp(yyjson_mut_get_str(type_val), "null") == 0) {
+			return type_val;
+		}
+		auto union_array = yyjson_mut_arr(doc);
+		yyjson_mut_arr_add_strcpy(doc, union_array, "null");
+		yyjson_mut_arr_add_val(union_array, type_val);
+		return union_array;
+	}
+
 	yyjson_mut_val *CreateJSONType(const LogicalType &type, optional_ptr<avro::FieldID> field_id,
 	                               const char *preset_schema_name = nullptr) {
 		auto avro_type_str = ConvertTypeToAvro(type);
@@ -302,10 +314,7 @@ public:
 			}
 
 			if (!element_field_id || element_field_id->nullable) {
-				auto union_array = yyjson_mut_arr(doc);
-				yyjson_mut_arr_add_strcpy(doc, union_array, "null");
-				yyjson_mut_arr_add_val(union_array, items_type_val);
-				items_type_val = union_array;
+				items_type_val = MakeNullable(items_type_val);
 			}
 			yyjson_mut_obj_add_val(doc, type_val, "items", items_type_val);
 
@@ -449,10 +458,7 @@ private:
 		}
 		auto struct_field_type = CreateJSONType(type, field_id, schema_name.c_str());
 		if (!field_id || field_id->nullable) {
-			auto union_array = yyjson_mut_arr(doc);
-			yyjson_mut_arr_add_strcpy(doc, union_array, "null");
-			yyjson_mut_arr_add_val(union_array, struct_field_type);
-			struct_field_type = union_array;
+			struct_field_type = MakeNullable(struct_field_type);
 		}
 		yyjson_mut_obj_add_val(doc, struct_field, "type", struct_field_type);
 		if (field_id) {
@@ -616,11 +622,6 @@ WriteAvroBindData::~WriteAvroBindData() {
 	avro_value_iface_decref(interface);
 }
 
-WriteAvroGlobalState::~WriteAvroGlobalState() {
-	//! NOTE: the 'writer' and 'datum_writer' do not need to be closed, they are owned by the file_writer
-	avro_file_writer_close(file_writer);
-}
-
 WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData &bind_data_p, FileSystem &fs,
                                            const string &file_path)
     : allocator(Allocator::Get(context)), memory_buffer(allocator), datum_buffer(allocator), fs(fs) {
@@ -633,10 +634,6 @@ WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData 
 	    MaxValue<idx_t>(BUFFER_SIZE, NextPowerOfTwo(bind_data.json_schema.size() + SYNC_SIZE + MAX_ROW_COUNT_BYTES));
 	memory_buffer.Resize(capacity);
 
-	int ret;
-	writer = avro_writer_memory(const_char_ptr_cast(memory_buffer.GetData()), memory_buffer.GetCapacity());
-	datum_writer = avro_writer_memory(const_char_ptr_cast(datum_buffer.GetData()), datum_buffer.GetCapacity());
-
 	const char *json_metadata = nullptr;
 	if (!bind_data.json_metadata.empty()) {
 		json_metadata = bind_data.json_metadata.c_str();
@@ -646,17 +643,35 @@ WriteAvroGlobalState::WriteAvroGlobalState(ClientContext &context, FunctionData 
 	//! natively (no post-processing). Empty -> nullptr -> avro-c default ("null"/uncompressed).
 	const char *codec = bind_data.codec.empty() ? nullptr : bind_data.codec.c_str();
 
-	while ((ret = avro_file_writer_create_from_writers_with_metadata_and_codec(
-	            writer, datum_writer, bind_data.schema, &file_writer, json_metadata, codec)) == ENOSPC) {
+	for (;;) {
+		avro_writer_ptr_t new_writer(
+		    avro_writer_memory(const_char_ptr_cast(memory_buffer.GetData()), memory_buffer.GetCapacity()));
+		if (!new_writer) {
+			throw InvalidInputException(avro_strerror());
+		}
+		avro_writer_ptr_t new_datum_writer(
+		    avro_writer_memory(const_char_ptr_cast(datum_buffer.GetData()), datum_buffer.GetCapacity()));
+		if (!new_datum_writer) {
+			throw InvalidInputException(avro_strerror());
+		}
+		avro_file_writer_t new_file_writer = nullptr;
+		auto ret = avro_file_writer_create_from_writers_with_metadata_and_codec(
+		    new_writer.get(), new_datum_writer.get(), bind_data.schema, &new_file_writer, json_metadata, codec);
+		file_writer.reset(new_file_writer);
+		if (file_writer) {
+			//! A returned file writer owns both memory writers, including on header errors.
+			writer = new_writer.release();
+			datum_writer = new_datum_writer.release();
+		}
+		if (ret != ENOSPC) {
+			if (ret) {
+				throw InvalidInputException(avro_strerror());
+			}
+			break;
+		}
+		file_writer.reset();
 		auto current_capacity = memory_buffer.GetCapacity();
 		memory_buffer.Resize(NextPowerOfTwo(current_capacity * 2));
-		// re-initialize writer to use correct data location
-		avro_file_writer_close(file_writer);
-		writer = avro_writer_memory(const_char_ptr_cast(memory_buffer.GetData()), memory_buffer.GetCapacity());
-		datum_writer = avro_writer_memory(const_char_ptr_cast(datum_buffer.GetData()), datum_buffer.GetCapacity());
-	}
-	if (ret) {
-		throw InvalidInputException(avro_strerror());
 	}
 
 	auto written_bytes = avro_writer_tell(writer);
@@ -989,15 +1004,13 @@ static unique_ptr<AvroColumnWriter> CreateAvroColumnWriter(const LogicalType &ty
 
 WriteAvroLocalState::WriteAvroLocalState(FunctionData &bind_data_p) {
 	auto &bind_data = bind_data_p.Cast<WriteAvroBindData>();
-	avro_generic_value_new(bind_data.interface, &value);
+	if (avro_generic_value_new(bind_data.interface, &row.value)) {
+		throw InvalidInputException(avro_strerror());
+	}
 	column_writers.reserve(bind_data.types.size());
 	for (auto &type : bind_data.types) {
 		column_writers.push_back(CreateAvroColumnWriter(type));
 	}
-}
-
-WriteAvroLocalState::~WriteAvroLocalState() {
-	avro_value_decref(&value);
 }
 
 static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, GlobalFunctionData &gstate_p,
@@ -1020,7 +1033,7 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 		for (idx_t col_idx = 0; col_idx < input.ColumnCount(); col_idx++) {
 			const char *unused_name;
 			avro_value_t column;
-			if (avro_value_get_by_index(&local_state.value, col_idx, &column, &unused_name)) {
+			if (avro_value_get_by_index(&local_state.row.value, col_idx, &column, &unused_name)) {
 				throw InvalidInputException(avro_strerror());
 			}
 			value_size += local_state.column_writers[col_idx]->Write(&column, i);
@@ -1038,7 +1051,7 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 		                                        datum_buffer.GetCapacity(), offset_in_datum_buffer);
 
 		int ret;
-		while ((ret = avro_file_writer_append_value(global_state.file_writer, &local_state.value)) == ENOSPC) {
+		while ((ret = avro_file_writer_append_value(global_state.file_writer.get(), &local_state.row.value)) == ENOSPC) {
 			auto current_capacity = datum_buffer.GetCapacity();
 			datum_buffer.ResizeAndCopy(NextPowerOfTwo(current_capacity * 2));
 			avro_writer_memory_set_dest_with_offset(global_state.datum_writer, (const char *)datum_buffer.GetData(),
@@ -1049,7 +1062,7 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 		}
 
 		offset_in_datum_buffer = avro_writer_tell(global_state.datum_writer);
-		avro_value_reset(&local_state.value);
+		avro_value_reset(&local_state.row.value);
 	}
 
 	auto &buffer = global_state.memory_buffer;
@@ -1063,7 +1076,7 @@ static void WriteAvroSink(ExecutionContext &context, FunctionData &bind_data_p, 
 
 	//! Flush the contents to the buffer, if it fails, resize the buffer and try again
 	int ret;
-	while ((ret = avro_file_writer_flush(global_state.file_writer)) == ENOSPC) {
+	while ((ret = avro_file_writer_flush(global_state.file_writer.get())) == ENOSPC) {
 		auto current_capacity = buffer.GetCapacity();
 		buffer.Resize(NextPowerOfTwo(current_capacity * 2));
 		avro_writer_memory_set_dest(global_state.writer, (const char *)buffer.GetData(), buffer.GetCapacity());

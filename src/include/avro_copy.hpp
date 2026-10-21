@@ -4,6 +4,7 @@
 #include <avro.h>
 #include "duckdb/common/serializer/memory_stream.hpp"
 #include "duckdb/common/file_system.hpp"
+#include <type_traits>
 
 namespace duckdb {
 
@@ -128,6 +129,35 @@ public:
 	idx_t capacity = 0;
 };
 
+struct AvroWriterDeleter {
+	void operator()(avro_writer_t writer) const {
+		avro_writer_free(writer);
+	}
+};
+using avro_writer_ptr_t = unique_ptr<std::remove_pointer_t<avro_writer_t>, AvroWriterDeleter>;
+
+struct AvroFileWriterDeleter {
+	void operator()(avro_file_writer_t writer) const {
+		//! Each completed block is flushed explicitly; destruction must also work after a failed flush.
+		avro_file_writer_free(writer);
+	}
+};
+using avro_file_writer_ptr_t = unique_ptr<std::remove_pointer_t<avro_file_writer_t>, AvroFileWriterDeleter>;
+
+struct AvroWriteValue {
+	AvroWriteValue() = default;
+	AvroWriteValue(const AvroWriteValue &) = delete;
+	AvroWriteValue &operator=(const AvroWriteValue &) = delete;
+
+	~AvroWriteValue() {
+		if (value.iface) {
+			avro_value_decref(&value);
+		}
+	}
+
+	avro_value_t value {};
+};
+
 struct WriteAvroGlobalState : public GlobalFunctionData {
 public:
 	static constexpr idx_t BUFFER_SIZE = 1024;
@@ -139,7 +169,6 @@ public:
 
 public:
 	WriteAvroGlobalState(ClientContext &context, FunctionData &bind_data_p, FileSystem &fs, const string &file_path);
-	virtual ~WriteAvroGlobalState();
 
 public:
 	void WriteData(const_data_ptr_t data, idx_t size) {
@@ -170,10 +199,10 @@ public:
 	//! The file handle to write to
 	unique_ptr<FileHandle> handle;
 
-	//! The writer for the file
-	avro_writer_t writer;
-	avro_writer_t datum_writer;
-	avro_file_writer_t file_writer;
+	//! Borrowed from file_writer after successful ownership transfer.
+	avro_writer_t writer = nullptr;
+	avro_writer_t datum_writer = nullptr;
+	avro_file_writer_ptr_t file_writer;
 
 	//! Running total of bytes written to the file (see BytesWritten()).
 	idx_t bytes_written = 0;
@@ -191,11 +220,10 @@ public:
 struct WriteAvroLocalState : public LocalFunctionData {
 public:
 	WriteAvroLocalState(FunctionData &bind_data_p);
-	virtual ~WriteAvroLocalState();
 
 public:
 	//! Avro value representing a row of the schema
-	avro_value_t value;
+	AvroWriteValue row;
 	vector<unique_ptr<AvroColumnWriter>> column_writers;
 };
 
