@@ -38,6 +38,13 @@ if(TARGET avro-static AND NOT MSVC)
   target_compile_options(avro-static PRIVATE -fno-sanitize=undefined)
 endif()
 
+# avro-c's raw -lstdc++ for snappy lands ahead of jemalloc on the link line; the C++ driver links it last anyway
+if(TARGET avro-static AND UNIX)
+  get_target_property(AVRO_STATIC_INTERFACE_LIBS avro-static INTERFACE_LINK_LIBRARIES)
+  list(REMOVE_ITEM AVRO_STATIC_INTERFACE_LIBS -lstdc++)
+  set_target_properties(avro-static PROPERTIES INTERFACE_LINK_LIBRARIES "${AVRO_STATIC_INTERFACE_LIBS}")
+endif()
+
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 
